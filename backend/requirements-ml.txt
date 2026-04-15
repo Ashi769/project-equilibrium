@@ -1,0 +1,3 @@
+# ML dependencies installed in Docker (Linux) only.
+# sentence-transformers requires torch which only has Linux/ARM64 macOS wheels.
+sentence-transformers>=3.0.0
