@@ -18,8 +18,8 @@ COPY pyproject.toml uv.lock* requirements-ml.txt ./
 # Install main deps
 RUN uv sync --frozen --no-dev
 
-# Install ML deps (torch + sentence-transformers, Linux wheels available)
-RUN uv run pip install -r requirements-ml.txt
+# Install ML deps (torch + sentence-transformers, Linux wheels only)
+RUN uv pip install --system -r requirements-ml.txt
 
 # Download spaCy model
 RUN uv run python -m spacy download en_core_web_sm
