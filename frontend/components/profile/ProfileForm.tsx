@@ -5,13 +5,16 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useRef, useState } from "react";
 import Link from "next/link";
-import { Camera, CheckCircle2, Clock, AlertCircle, RefreshCw, LogOut, ChevronRight } from "lucide-react";
+import { Camera, CheckCircle2, Clock, AlertCircle, RefreshCw, LogOut, ChevronRight, X, Upload, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 
-interface UserPhoto { id: string; filename: string; is_selfie: boolean; }
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+interface UserPhoto { id: string; filename: string; is_selfie: boolean; url?: string | null; }
 interface UserProfile {
   id: string; name: string; email: string; age: number | null; gender: string | null;
   analysis_status: "pending" | "processing" | "complete" | null;
@@ -73,6 +76,49 @@ export function ProfileForm({
     mutationFn: () => api.post("/api/v1/interview/reset", {}, accessToken),
   });
 
+  // ── Photo editing state ──────────────────────────────────────────────────
+  const [editingPhotos, setEditingPhotos] = useState(false);
+  const [newFiles, setNewFiles] = useState<File[]>([]);
+  const [newSelfie, setNewSelfie] = useState<File | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoSaving, setPhotoSaving] = useState(false);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const selfieInputRef  = useRef<HTMLInputElement>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: (photoId: string) =>
+      fetch(`${API_URL}/api/v1/photos/${photoId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).then((r) => { if (!r.ok && r.status !== 204) throw new Error("Delete failed"); }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["photos"] }),
+  });
+
+  async function savePhotoChanges() {
+    if (!newFiles.length && !newSelfie) { setEditingPhotos(false); return; }
+    setPhotoSaving(true); setPhotoError(null);
+    try {
+      const form = new FormData();
+      newFiles.forEach((f) => form.append("photos", f));
+      if (newSelfie) form.append("selfie", newSelfie);
+      const res = await fetch(`${API_URL}/api/v1/photos/add`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form,
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "Upload failed");
+      setNewFiles([]); setNewSelfie(null);
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      setEditingPhotos(false);
+    } catch (e: unknown) {
+      setPhotoError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setPhotoSaving(false);
+    }
+  }
+
+  const currentGalleryCount = (galleryPhotos?.length ?? 0) + newFiles.length;
+
   const { register, handleSubmit } = useForm<HardFiltersForm>({
     resolver: zodResolver(hardFiltersSchema),
     defaultValues: { wants_children: "open", max_age_diff: 10, seeking_gender: "any" },
@@ -99,7 +145,7 @@ export function ProfileForm({
         <div className="flex items-center gap-4">
           {selfie ? (
             <img
-              src={`/api/photos/${selfie.filename}`}
+              src={selfie.url ?? `/api/photos/${selfie.filename}`}
               alt="Selfie"
               className="w-14 h-14 flex-shrink-0 object-cover border-2 border-[#2d2d2d]"
               style={{ borderRadius: "var(--radius-wobbly-sm)" }}
@@ -143,21 +189,138 @@ export function ProfileForm({
         style={{ borderRadius: "var(--radius-wobbly)", boxShadow: "var(--shadow-hard)" }}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b-2 border-dashed border-[#e5e0d8]">
-          <span className="font-heading text-lg font-bold" style={{ color: "var(--ink)" }}>Photos</span>
-          <Link href="/onboarding">
+          <span className="font-heading text-lg font-bold" style={{ color: "var(--ink)" }}>
+            Photos
+            {editingPhotos && (
+              <span className="ml-2 text-sm font-normal" style={{ color: "var(--muted)" }}>
+                ({currentGalleryCount}/5 gallery)
+              </span>
+            )}
+          </span>
+          {editingPhotos ? (
+            <div className="flex items-center gap-3">
+              <button
+                className="text-sm font-medium"
+                style={{ color: "var(--muted)" }}
+                onClick={() => { setEditingPhotos(false); setNewFiles([]); setNewSelfie(null); setPhotoError(null); }}
+              >
+                Cancel
+              </button>
+              <Button size="sm" onClick={savePhotoChanges} disabled={photoSaving}>
+                {photoSaving ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          ) : (
             <button
               className="flex items-center gap-1.5 text-sm font-medium transition-colors"
               style={{ color: "var(--muted)" }}
               onMouseEnter={(e) => (e.currentTarget.style.color = "#2d5da1")}
               onMouseLeave={(e) => (e.currentTarget.style.color = "var(--muted)")}
+              onClick={() => setEditingPhotos(true)}
             >
               <Camera className="h-3.5 w-3.5" strokeWidth={2.5} />
               Update
             </button>
-          </Link>
+          )}
         </div>
-        <div className="p-5">
-          {photos && photos.length > 0 ? (
+        <div className="p-5 space-y-4">
+          {/* Gallery photos */}
+          {editingPhotos ? (
+            <>
+              <input
+                ref={galleryInputRef} type="file"
+                accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  const slots = 5 - currentGalleryCount;
+                  setNewFiles((prev) => [...prev, ...files.slice(0, slots)]);
+                  e.target.value = "";
+                }}
+              />
+              <input
+                ref={selfieInputRef} type="file"
+                accept="image/jpeg,image/png,image/webp" className="hidden"
+                onChange={(e) => { if (e.target.files?.[0]) setNewSelfie(e.target.files[0]); e.target.value = ""; }}
+              />
+              <div>
+                <p className="text-sm font-medium mb-2" style={{ color: "var(--ink)" }}>Gallery</p>
+                <div className="grid grid-cols-5 gap-2">
+                  {galleryPhotos.map((photo) => (
+                    <div key={photo.id} className="relative aspect-square group">
+                      <img
+                        src={photo.url ?? ""}
+                        alt=""
+                        className="w-full h-full object-cover border-2 border-[#2d2d2d]"
+                        style={{ borderRadius: "var(--radius-wobbly-sm)" }}
+                      />
+                      <button
+                        onClick={() => deleteMutation.mutate(photo.id)}
+                        disabled={deleteMutation.isPending}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-white border-2 border-[#2d2d2d] opacity-0 group-hover:opacity-100 transition-opacity"
+                        style={{ borderRadius: "50%" }}
+                      >
+                        <X className="h-2.5 w-2.5" style={{ color: "var(--ink)" }} />
+                      </button>
+                    </div>
+                  ))}
+                  {newFiles.map((f, i) => (
+                    <div key={i} className="relative aspect-square group">
+                      <img
+                        src={URL.createObjectURL(f)}
+                        alt=""
+                        className="w-full h-full object-cover border-2 border-[#2d5da1]"
+                        style={{ borderRadius: "var(--radius-wobbly-sm)" }}
+                      />
+                      <button
+                        onClick={() => setNewFiles((prev) => prev.filter((_, j) => j !== i))}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 flex items-center justify-center bg-white border-2 border-[#2d2d2d] opacity-0 group-hover:opacity-100 transition-opacity"
+                        style={{ borderRadius: "50%" }}
+                      >
+                        <X className="h-2.5 w-2.5" style={{ color: "var(--ink)" }} />
+                      </button>
+                    </div>
+                  ))}
+                  {currentGalleryCount < 5 && (
+                    <button
+                      onClick={() => galleryInputRef.current?.click()}
+                      className="aspect-square flex items-center justify-center border-2 border-dashed border-[#2d2d2d] transition-all hover:border-[#2d5da1] hover:bg-[#fff9c4]"
+                      style={{ borderRadius: "var(--radius-wobbly-sm)" }}
+                    >
+                      <Plus className="h-4 w-4" style={{ color: "var(--muted)" }} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {/* Selfie row */}
+              <div>
+                <p className="text-sm font-medium mb-2" style={{ color: "var(--ink)" }}>Selfie</p>
+                <div className="flex items-center gap-3">
+                  {(newSelfie || selfie) && (
+                    <img
+                      src={newSelfie ? URL.createObjectURL(newSelfie) : (selfie!.url ?? "")}
+                      alt="selfie"
+                      className="w-14 h-14 object-cover border-2 flex-shrink-0"
+                      style={{
+                        borderRadius: "var(--radius-wobbly-sm)",
+                        borderColor: newSelfie ? "#2d5da1" : "#2d2d2d",
+                      }}
+                    />
+                  )}
+                  <button
+                    onClick={() => selfieInputRef.current?.click()}
+                    className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 border-2 border-[#2d2d2d] transition-all hover:bg-[#fff9c4]"
+                    style={{ borderRadius: "var(--radius-wobbly-sm)", color: "var(--ink)" }}
+                  >
+                    <Upload className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    {selfie || newSelfie ? "Replace selfie" : "Upload selfie"}
+                  </button>
+                </div>
+              </div>
+              {photoError && (
+                <p className="text-sm" style={{ color: "var(--accent)" }}>{photoError}</p>
+              )}
+            </>
+          ) : photos && photos.length > 0 ? (
             <div className="grid grid-cols-4 gap-2">
               {galleryPhotos.map((photo) => (
                 <div
@@ -165,7 +328,7 @@ export function ProfileForm({
                   className="aspect-square overflow-hidden border-2 border-[#2d2d2d]"
                   style={{ borderRadius: "var(--radius-wobbly-sm)", background: "var(--muted-bg)" }}
                 >
-                  <img src={`/api/photos/${photo.filename}`} alt="" className="w-full h-full object-cover" />
+                  <img src={photo.url ?? ""} alt="" className="w-full h-full object-cover" />
                 </div>
               ))}
             </div>
@@ -176,9 +339,9 @@ export function ProfileForm({
             >
               <Camera className="h-7 w-7" style={{ color: "var(--muted)" }} strokeWidth={2.5} />
               <p className="text-base" style={{ color: "var(--muted)" }}>No photos uploaded yet</p>
-              <Link href="/onboarding">
-                <Button size="sm" variant="secondary">Upload Photos</Button>
-              </Link>
+              <Button size="sm" variant="secondary" onClick={() => setEditingPhotos(true)}>
+                Upload Photos
+              </Button>
             </div>
           )}
         </div>
