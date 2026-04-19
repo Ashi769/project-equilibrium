@@ -10,11 +10,36 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+type BackendTokens = {
+  access_token: string;
+  refresh_token: string;
+  user: { id: string; email: string; name: string };
+};
+
+async function getBackendTokens(
+  provider: "google" | "credentials" | "refresh",
+  payload: Record<string, string>,
+): Promise<BackendTokens | null> {
+  const endpoint =
+    provider === "google"
+      ? "/api/v1/auth/google"
+      : provider === "refresh"
+        ? "/api/v1/auth/refresh"
+        : "/api/v1/auth/login";
+  const res = await fetch(`${API_URL}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     Google({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      clientId: process.env.AUTH_GOOGLE_ID!,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET!,
     }),
     Credentials({
       credentials: {
@@ -25,14 +50,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const parsed = loginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
-        const res = await fetch(`${API_URL}/api/v1/auth/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(parsed.data),
-        });
+        const data = await getBackendTokens("credentials", parsed.data);
+        if (!data) return null;
 
-        if (!res.ok) return null;
-        const data = await res.json();
         return {
           id: data.user.id,
           email: data.user.email,
@@ -44,32 +64,56 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    async signIn({ user, account }) {
-      if (account?.provider === "google") {
-        const res = await fetch(`${API_URL}/api/v1/auth/google`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id_token: account.id_token }),
-        });
-        if (!res.ok) return false;
-        const data = await res.json();
-        user.accessToken = data.access_token;
-        user.refreshToken = data.refresh_token;
-        user.id = data.user.id;
-      }
-      return true;
-    },
-    async jwt({ token, user }) {
-      if (user) {
-        token.accessToken = user.accessToken;
-        token.refreshToken = user.refreshToken;
+    async jwt({ token, user, account }) {
+      // Initial sign-in with credentials
+      if (user && (user as any).accessToken) {
+        token.accessToken = (user as any).accessToken;
+        token.refreshToken = (user as any).refreshToken;
         token.userId = user.id;
+        token.accessTokenExpires = Date.now() + 14 * 60 * 1000; // 14 min
+        return token;
       }
+
+      // Initial sign-in with Google
+      if (account?.provider === "google" && account.id_token) {
+        const data = await getBackendTokens("google", { id_token: account.id_token });
+        if (data) {
+          token.accessToken = data.access_token;
+          token.refreshToken = data.refresh_token;
+          token.userId = data.user.id;
+          token.accessTokenExpires = Date.now() + 14 * 60 * 1000;
+        }
+        return token;
+      }
+
+      // Token still valid — return as-is
+      if (Date.now() < (token.accessTokenExpires as number ?? 0)) {
+        return token;
+      }
+
+      // Access token expired — try to refresh
+      if (!token.refreshToken) return token;
+
+      const data = await getBackendTokens("refresh", {
+        refresh_token: token.refreshToken as string,
+      });
+
+      if (data) {
+        token.accessToken = data.access_token;
+        token.refreshToken = data.refresh_token;
+        token.accessTokenExpires = Date.now() + 14 * 60 * 1000;
+      } else {
+        // Refresh failed — clear tokens so pages can redirect to login
+        token.accessToken = undefined;
+        token.refreshToken = undefined;
+      }
+
       return token;
     },
+
     async session({ session, token }) {
-      session.accessToken = token.accessToken as string;
-      session.userId = token.userId as string;
+      session.accessToken = (token.accessToken as string) ?? "";
+      session.userId = (token.userId as string) ?? "";
       return session;
     },
   },

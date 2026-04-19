@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-equilibrium}
       POSTGRES_DB: ${POSTGRES_DB:-equilibrium}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -35,6 +35,12 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Override localhost URLs with Docker service names
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-equilibrium}:${POSTGRES_PASSWORD:-equilibrium}@postgres:5432/${POSTGRES_DB:-equilibrium}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
     ports:
       - "8000:8000"
     depends_on:
@@ -44,7 +50,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - uploads_data:/app/uploads
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   celery_worker:
     build:
@@ -52,6 +59,11 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-equilibrium}:${POSTGRES_PASSWORD:-equilibrium}@postgres:5432/${POSTGRES_DB:-equilibrium}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,8 +71,10 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+      - uploads_data:/app/uploads
+    command: uv run celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
 
 volumes:
   postgres_data:
   redis_data:
+  uploads_data:

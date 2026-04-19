@@ -6,14 +6,20 @@ Matching engine:
 4. Return top N matches with dimension breakdown
 """
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text, and_, or_
+from sqlalchemy import select, text, and_, or_, exists
 from app.models.user import User
 from app.models.psychometric import PsychometricProfile, AnalysisStatus
+from app.models.schedule import Meeting, MeetingStatus
 from app.schemas.matches import MatchSummary, MatchDetail, DimensionScore
 
 NEUROTICISM_PENALTY_THRESHOLD = 0.75  # Both users above this → penalize
 NEUROTICISM_PENALTY = 0.15
 TOP_N = 20
+
+# Matching weight distribution
+WEIGHT_SEMANTIC = 0.55      # aspiration_A vs identity_B
+WEIGHT_LINGUISTIC = 0.25    # communication style similarity
+WEIGHT_OCEAN = 0.20         # OCEAN dimension similarity
 
 
 async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
@@ -45,6 +51,15 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
     if max_age_diff and user.age:
         conditions.append(User.age.between(user.age - max_age_diff, user.age + max_age_diff))
 
+    # Exclude users who have any meeting history with current user
+    meeting_exists = exists().where(
+        or_(
+            and_(Meeting.proposer_id == user.id, Meeting.match_id == User.id),
+            and_(Meeting.proposer_id == User.id, Meeting.match_id == user.id),
+        ),
+    )
+    conditions.append(~meeting_exists)
+
     # wants_children hard filter
     my_wants_children = hard_filters.get("wants_children")
     if my_wants_children is not None:
@@ -56,29 +71,49 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
             )
         )
 
-    # pgvector cosine similarity query
-    # aspiration_vector of current user vs identity_vector of candidates
-    aspiration_vec = str(my_profile.aspiration_vector)
+    raw_vec = my_profile.aspiration_vector
+    if hasattr(raw_vec, "tolist"):
+        raw_vec = raw_vec.tolist()
+    aspiration_vec = "[" + ",".join(str(float(v)) for v in raw_vec) + "]"
+
+    has_comm_vec = my_profile.communication_vector is not None
+    comm_vec_str = ""
+    if has_comm_vec:
+        raw_comm = my_profile.communication_vector
+        if hasattr(raw_comm, "tolist"):
+            raw_comm = raw_comm.tolist()
+        comm_vec_str = "[" + ",".join(str(float(v)) for v in raw_comm) + "]"
+
+    similarity_cols = [
+        text(f"1 - (psychometric_profiles.identity_vector <=> '{aspiration_vec}'::vector) AS semantic_sim"),
+    ]
+    if has_comm_vec:
+        similarity_cols.append(
+            text(f"COALESCE(1 - (psychometric_profiles.communication_vector <=> '{comm_vec_str}'::vector), NULL) AS comm_sim"),
+        )
 
     query = (
-        select(
-            User,
-            PsychometricProfile,
-            text(f"1 - (psychometric_profiles.identity_vector <=> '{aspiration_vec}'::vector) AS similarity"),
-        )
+        select(User, PsychometricProfile, *similarity_cols)
         .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
         .where(and_(*conditions))
-        .order_by(text("similarity DESC"))
-        .limit(TOP_N * 2)  # Over-fetch to allow for penalty filtering
+        .order_by(text("semantic_sim DESC"))
+        .limit(TOP_N * 2)
     )
 
     rows = (await db.execute(query)).all()
 
     matches = []
     for row in rows:
-        candidate_user, candidate_profile, similarity = row
+        if has_comm_vec:
+            candidate_user, candidate_profile, semantic_sim, comm_sim = row
+        else:
+            candidate_user, candidate_profile, semantic_sim = row
+            comm_sim = None
 
-        score = float(similarity)
+        semantic_score = float(semantic_sim)
+        linguistic_score = float(comm_sim) if comm_sim is not None else semantic_score
+
+        score = (WEIGHT_SEMANTIC * semantic_score) + (WEIGHT_LINGUISTIC * linguistic_score) + (WEIGHT_OCEAN * _ocean_similarity(my_profile, candidate_profile))
 
         # Neuroticism conflict penalty
         my_n = (my_profile.ocean_scores or {}).get("neuroticism", 0)
@@ -126,16 +161,21 @@ async def get_match_detail(user: User, match_user_id: str, db: AsyncSession) -> 
     if not my_profile or my_profile.aspiration_vector is None or match_profile.identity_vector is None:
         return None
 
-    # Compute overall score
+    has_comm = my_profile.communication_vector is not None and match_profile.communication_vector is not None
+    comm_clause = ", 1 - (a.communication_vector <=> b.communication_vector) AS comm_sim" if has_comm else ""
     similarity_result = await db.execute(
         text(
-            "SELECT 1 - (a.aspiration_vector <=> b.identity_vector) AS sim "
+            f"SELECT 1 - (a.aspiration_vector <=> b.identity_vector) AS sem_sim{comm_clause} "
             "FROM psychometric_profiles a, psychometric_profiles b "
             "WHERE a.user_id = :uid_a AND b.user_id = :uid_b"
         ).bindparams(uid_a=user.id, uid_b=match_user_id)
     )
     sim_row = similarity_result.first()
-    base_score = float(sim_row[0]) if sim_row else 0.0
+    semantic_score = float(sim_row[0]) if sim_row else 0.0
+    linguistic_score = float(sim_row[1]) if (sim_row and has_comm) else semantic_score
+    ocean_sim = _ocean_similarity(my_profile, match_profile)
+
+    base_score = (WEIGHT_SEMANTIC * semantic_score) + (WEIGHT_LINGUISTIC * linguistic_score) + (WEIGHT_OCEAN * ocean_sim)
 
     my_n = (my_profile.ocean_scores or {}).get("neuroticism", 0)
     their_n = (match_profile.ocean_scores or {}).get("neuroticism", 0)
@@ -159,6 +199,17 @@ async def get_match_detail(user: User, match_user_id: str, db: AsyncSession) -> 
         attachment_style=match_profile.attachment_style,
         shared_values=shared_values,
     )
+
+
+def _ocean_similarity(
+    my_profile: PsychometricProfile,
+    their_profile: PsychometricProfile,
+) -> float:
+    my_ocean = my_profile.ocean_scores or {}
+    their_ocean = their_profile.ocean_scores or {}
+    keys = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+    diffs = [abs(my_ocean.get(k, 0.5) - their_ocean.get(k, 0.5)) for k in keys]
+    return 1.0 - (sum(diffs) / len(diffs))
 
 
 def _compute_top_dimensions(

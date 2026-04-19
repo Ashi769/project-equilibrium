@@ -1,19 +1,90 @@
+@import url('https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Patrick+Hand&display=swap');
 @import "tailwindcss";
 
+@theme {
+  --color-paper: #fdfbf7;
+  --color-ink: #2d2d2d;
+  --color-muted-bg: #e5e0d8;
+  --color-accent: #ff4d4d;
+  --color-secondary: #2d5da1;
+  --color-surface: #ffffff;
+  --color-postit: #fff9c4;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #09090b;
+  /* Core tokens */
+  --paper: #fdfbf7;
+  --ink: #2d2d2d;
+  --muted-bg: #e5e0d8;
+  --accent: #ff4d4d;
+  --secondary: #2d5da1;
+  --surface: #ffffff;
+  --postit: #fff9c4;
+  --muted: #888888;
+  --dim: #b0a898;
+
+  /* Legacy aliases so unmodified Radix/utility code still resolves */
+  --bg: var(--paper);
+  --fg: var(--ink);
+  --border: var(--ink);
+  --border-light: #888888;
+  --border-hover: #555555;
+  --surface2: var(--muted-bg);
+  --gold: var(--accent);
+  --cream: var(--ink);
+  --accent-dim: rgba(255, 77, 77, 0.1);
+  --red: var(--accent);
+
+  /* Wobbly radius presets — use inline style={{ borderRadius: "var(...)" }} */
+  --radius-wobbly: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  --radius-wobbly-alt: 15px 225px 15px 255px / 225px 15px 255px 15px;
+  --radius-wobbly-btn: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  --radius-wobbly-sm: 85px 10px 75px 10px / 10px 75px 10px 85px;
+
+  /* Hard offset shadows — no blur */
+  --shadow-hard: 4px 4px 0px 0px #2d2d2d;
+  --shadow-hard-lg: 8px 8px 0px 0px #2d2d2d;
+  --shadow-hard-sm: 2px 2px 0px 0px #2d2d2d;
+}
+
+html {
+  color-scheme: light;
+  background-color: #fdfbf7;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: system-ui, -apple-system, sans-serif;
+  background-color: #fdfbf7;
+  color: var(--ink);
+  font-family: 'Patrick Hand', 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  background-image: radial-gradient(#e5e0d8 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
-/* Smooth scrollbar */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #d4d4d8 transparent;
+.font-heading {
+  font-family: 'Kalam', cursive;
 }
+
+/* Scrollbar */
+* { scrollbar-width: thin; scrollbar-color: var(--muted-bg) transparent; }
+*::-webkit-scrollbar { width: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--muted-bg); border-radius: 2px; }
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.cursor-blink { animation: cursor-blink 0.8s ease-in-out infinite; }
+
+@keyframes bounce-gentle {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-10px); }
+}
+.bounce-gentle { animation: bounce-gentle 3s ease-in-out infinite; }
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.spin-slow { animation: spin-slow 2.5s linear infinite; }

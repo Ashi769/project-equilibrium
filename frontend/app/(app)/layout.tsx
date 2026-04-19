@@ -1,30 +1,32 @@
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { NavLinks } from "@/components/layout/NavLinks";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session) redirect("/login");
 
   return (
-    <div className="min-h-screen flex flex-col bg-zinc-50">
-      <header className="sticky top-0 z-10 bg-white border-b border-zinc-200">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-          <Link href="/matches" className="font-semibold text-violet-600 flex items-center gap-1.5">
-            ⚖️ Equilibrium
+    <div className="min-h-screen flex flex-col" style={{ background: "var(--paper)" }}>
+      <header
+        className="sticky top-0 z-20 border-b-2 border-[#2d2d2d]"
+        style={{ background: "var(--paper)" }}
+      >
+        <div className="max-w-5xl mx-auto px-8 h-14 flex items-center justify-between">
+          <Link href="/selection" className="flex items-center gap-2 group">
+            <span className="font-heading text-2xl font-bold" style={{ color: "var(--ink)" }}>⚖</span>
+            <span
+              className="font-heading text-lg font-bold tracking-widest"
+              style={{ color: "var(--ink)", letterSpacing: "0.18em" }}
+            >
+              EQUILIBRIUM
+            </span>
           </Link>
-          <nav className="flex items-center gap-1">
-            <Link href="/matches">
-              <Button variant="ghost" size="sm">Matches</Button>
-            </Link>
-            <Link href="/profile">
-              <Button variant="ghost" size="sm">Profile</Button>
-            </Link>
-          </nav>
+          <NavLinks />
         </div>
       </header>
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-8 py-8">
         {children}
       </main>
     </div>

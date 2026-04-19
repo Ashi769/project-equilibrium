@@ -27,3 +27,6 @@ class User(Base):
     interview_sessions: Mapped[list["InterviewSession"]] = relationship(
         "InterviewSession", back_populates="user", lazy="select"
     )
+    photos: Mapped[list["UserPhoto"]] = relationship(
+        "UserPhoto", back_populates="user", lazy="select"
+    )

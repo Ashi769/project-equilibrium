@@ -1,73 +1,125 @@
 """
-Manages interview sessions using Groq (Llama 3 8B) as the AI interviewer.
-The system prompt contains a structured interview script targeting OCEAN traits,
-attachment styles, and core values.
+Manages interview sessions using Groq as the AI interviewer.
+
+Ending strategy:
+- The backend tracks which topics have been covered using a separate non-streaming
+  Groq call after each user message (cheap, ~50 tokens).
+- Once all required topics are covered, the backend appends a closing message
+  and sends [END_INTERVIEW] — no sentinel parsing needed.
 """
 from groq import AsyncGroq
 from app.core.config import settings
 
-INTERVIEW_SYSTEM_PROMPT = """You are a warm, empathetic interview guide for a matchmaking platform called Equilibrium.
-Your goal is to understand the person deeply through natural conversation — not a survey.
+ALL_TOPICS = [
+    "lifestyle",          # daily life, hobbies, how they spend time
+    "social",             # relationships with friends/family, how they recharge
+    "past_relationships", # what worked, what didn't
+    "conflict",           # how they handle disagreements
+    "values",             # life goals, career, family, finances
+    "ideal_partner",      # what they want in a partner
+]
 
-You are conducting a structured but conversational interview to uncover:
-1. **Big Five (OCEAN) traits**: Openness, Conscientiousness, Extraversion, Agreeableness, Neuroticism
-2. **Attachment style**: Secure, Anxious, or Avoidant patterns in relationships
-3. **Core values**: Financial philosophy, family goals, lifestyle preferences, life priorities
-4. **Effort & depth**: Measure response length and thoughtfulness as a signal of seriousness
+# In dev, set INTERVIEW_MIN_TOPICS=2 in .env to end after 2 topics (~3 min test)
+_min = getattr(settings, "interview_min_topics", len(ALL_TOPICS))
+REQUIRED_TOPICS = ALL_TOPICS[:_min]
 
-Interview structure (follow this loosely, adapt to conversation flow):
-- Open warmly. Ask about their typical week, what energizes them vs drains them.
-- Explore social life: how they recharge, relationship with friends/family.
-- Dive into past relationships: what worked, what didn't, patterns they've noticed.
-- Explore conflict: how they handle disagreements, what frustrates them most.
-- Values: what does a good life look like to them in 5 years? Kids, career, lifestyle?
-- Ideal partner: describe the person, not just traits but how they make you feel.
+INTERVIEW_SYSTEM_PROMPT = """You are a warm, empathetic interviewer for a matchmaking platform called Equilibrium.
+Your job is to understand the person through natural conversation — not a survey.
+
+Cover these areas naturally through the conversation:
+- Daily life and lifestyle (hobbies, how they spend their time)
+- Social life (friendships, family, how they recharge)
+- Past relationships (what worked, what didn't, patterns they notice)
+- Conflict and communication style
+- Life values and goals (career, family, finances, where they see themselves in 5 years)
+- What they want in a partner (not just traits, but how that person makes them feel)
 
 Rules:
-- Ask ONE question at a time. Never ask multiple questions in one message.
-- Listen and respond to what they say before moving on — don't mechanically follow the script.
-- Be warm and curious, not clinical.
-- After approximately 20-25 exchanges, naturally conclude the interview.
-- When concluding, end your message with exactly: [INTERVIEW_COMPLETE]
+- Ask ONE question at a time.
+- Be warm, curious, and conversational — not clinical.
+- Build on what they say before moving to the next area.
+- Never mention psychology, personality tests, or frameworks by name."""
 
-Start by welcoming them warmly and asking your first open question."""
+TOPIC_CHECK_PROMPT = """You are tracking which topics have been covered in an interview transcript.
+
+Topics to track: lifestyle, social, past_relationships, conflict, values, ideal_partner
+
+Given this transcript, return ONLY a JSON array of topics that have been meaningfully covered.
+Example: ["lifestyle", "social", "past_relationships"]
+
+Transcript:
+{transcript}
+
+Return ONLY the JSON array, nothing else."""
 
 OPENING_MESSAGE = (
     "Hi! I'm so glad you're here. This conversation is a chance for us to get to know you — "
     "not through a form or a list of checkboxes, but through real conversation. "
     "There are no right or wrong answers, just your honest perspective.\n\n"
-    "Let's start with something simple: **What does a typical week look like for you right now?** "
+    "Let's start with something simple: what does a typical week look like for you right now? "
     "What takes up most of your time, and what parts do you actually look forward to?"
 )
 
+CLOSING_MESSAGE = (
+    "Thank you so much for sharing all of this with me — I really enjoyed getting to know you. "
+    "Your answers give us a genuinely rich picture of who you are and what you're looking for. "
+    "We'll now build your profile and start finding your most compatible matches. Good luck! 🌟"
+)
 
-async def stream_response(messages: list[dict], session_id: str):
+
+def _format_transcript(messages: list[dict]) -> str:
+    return "\n".join(
+        f"{'Interviewer' if m['role'] == 'assistant' else 'User'}: {m['content']}"
+        for m in messages
+    )
+
+
+async def check_covered_topics(messages: list[dict]) -> list[str]:
+    """Non-streaming call to check which topics have been covered so far."""
+    client = AsyncGroq(api_key=settings.groq_api_key)
+    transcript = _format_transcript(messages)
+
+    try:
+        response = await client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "user", "content": TOPIC_CHECK_PROMPT.format(transcript=transcript)}
+            ],
+            stream=False,
+            temperature=0,
+            max_tokens=100,
+        )
+        import json, re
+        text = response.choices[0].message.content or "[]"
+        match = re.search(r"\[.*?\]", text, re.DOTALL)
+        return json.loads(match.group()) if match else []
+    except Exception:
+        return []
+
+
+def all_topics_covered(covered: list[str]) -> bool:
+    return all(t in covered for t in REQUIRED_TOPICS)
+
+
+async def stream_response(messages: list[dict]):
     """
-    Stream Groq response tokens. Yields SSE-formatted strings.
-    Detects [INTERVIEW_COMPLETE] and yields [END_INTERVIEW] sentinel.
+    Stream the AI interviewer response as SSE.
+    Returns (async generator, is_last_message).
+    Caller decides whether to append [END_INTERVIEW] after streaming.
     """
     client = AsyncGroq(api_key=settings.groq_api_key)
 
-    full_response = ""
     stream = await client.chat.completions.create(
-        model="llama3-8b-8192",
+        model="llama-3.1-8b-instant",
         messages=[{"role": "system", "content": INTERVIEW_SYSTEM_PROMPT}] + messages,
         stream=True,
         temperature=0.7,
-        max_tokens=500,
+        max_tokens=400,
     )
 
     async for chunk in stream:
         delta = chunk.choices[0].delta.content or ""
         if delta:
-            # Strip [INTERVIEW_COMPLETE] from streamed output
-            if "[INTERVIEW_COMPLETE]" in (full_response + delta):
-                clean = delta.replace("[INTERVIEW_COMPLETE]", "").strip()
-                if clean:
-                    yield f"data: {clean}\n\n"
-                yield "data: [END_INTERVIEW]\n\n"
-                return
-            full_response += delta
             yield f"data: {delta}\n\n"
 
     yield "data: [DONE]\n\n"

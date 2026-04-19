@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel
 from app.models.psychometric import AnalysisStatus
 
@@ -16,6 +17,8 @@ class ProfileResponse(BaseModel):
     gender: str | None
     analysis_status: AnalysisStatus | None
     hard_filters: dict
+    reinterview_due: bool = False
+    reinterview_due_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

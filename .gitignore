@@ -22,6 +22,10 @@ out/
 *.tsbuildinfo
 .turbo/
 
+# Uploads (served via R2, not stored in repo)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
 # Docker
 *.log
 

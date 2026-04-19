@@ -1,144 +1,162 @@
-"use client";
-
-import { useSession } from "next-auth/react";
-import { useQuery } from "@tanstack/react-query";
-import { useParams } from "next/navigation";
+import { auth } from "@/lib/auth";
+import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
 
-interface DimensionScore {
-  label: string;
-  score: number;
-  description: string;
-}
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+interface DimensionScore { label: string; score: number; description: string; }
 interface MatchDetail {
-  id: string;
-  name: string;
-  age: number;
-  compatibility_score: number;
-  dimension_scores: DimensionScore[];
-  attachment_style: string;
-  shared_values: string[];
+  id: string; name: string; age: number; compatibility_score: number;
+  dimension_scores: DimensionScore[]; attachment_style: string; shared_values: string[];
 }
 
-function ScoreBar({ score, label }: { score: number; label: string }) {
+function ScoreBar({ score, label, description }: { score: number; label: string; description?: string }) {
   const pct = Math.round(score * 100);
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-sm">
-        <span className="text-zinc-600">{label}</span>
-        <span className="font-medium text-violet-700">{pct}%</span>
+    <div className="space-y-2">
+      <div className="flex justify-between items-baseline">
+        <span className="text-base" style={{ color: "var(--ink)" }}>{label}</span>
+        <span className="font-heading text-xl font-bold" style={{ color: "var(--accent)" }}>{pct}%</span>
       </div>
-      <div className="h-2 rounded-full bg-zinc-100 overflow-hidden">
+      {/* Hand-drawn progress bar */}
+      <div
+        className="h-4 border-2 border-[#2d2d2d] overflow-hidden"
+        style={{ borderRadius: "var(--radius-wobbly-sm)", background: "var(--muted-bg)" }}
+      >
         <div
-          className="h-full rounded-full bg-violet-500 transition-all duration-700"
-          style={{ width: `${pct}%` }}
+          className="h-full transition-all duration-700"
+          style={{ width: `${pct}%`, background: "var(--accent)" }}
         />
       </div>
+      {description && (
+        <p className="text-sm" style={{ color: "var(--muted)" }}>{description}</p>
+      )}
     </div>
   );
 }
 
-export default function MatchDetailPage() {
-  const { data: session } = useSession();
-  const { id } = useParams<{ id: string }>();
+export default async function MatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const session = await auth();
+  if (!session?.accessToken) redirect("/login");
 
-  const { data: match, isLoading } = useQuery({
-    queryKey: ["match", id],
-    queryFn: () => api.get<MatchDetail>(`/api/v1/matches/${id}`, session?.accessToken),
-    enabled: !!session?.accessToken && !!id,
+  const { id } = await params;
+  const res = await fetch(`${API_URL}/api/v1/matches/${id}`, {
+    headers: { Authorization: `Bearer ${session.accessToken}` },
+    cache: "no-store",
   });
 
-  if (isLoading) {
-    return <div className="h-64 rounded-xl bg-zinc-100 animate-pulse" />;
-  }
+  if (res.status === 404) notFound();
+  if (!res.ok) redirect("/matches");
 
-  if (!match) {
-    return (
-      <div className="text-center py-20 text-zinc-500">
-        Match not found.{" "}
-        <Link href="/matches" className="text-violet-600 hover:underline">
-          Back to matches
-        </Link>
-      </div>
-    );
-  }
-
-  const pct = Math.round(match.compatibility_score * 100);
+  const match: MatchDetail = await res.json();
+  const pct      = Math.round(match.compatibility_score * 100);
+  const initials = match.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <Link href="/matches">
-        <Button variant="ghost" size="sm" className="gap-1.5">
-          <ArrowLeft className="h-4 w-4" />
-          Back to matches
-        </Button>
+    <div className="max-w-xl mx-auto space-y-5 pb-10">
+      <Link
+        href="/matches"
+        className="inline-flex items-center gap-1.5 text-base font-medium transition-colors"
+        style={{ color: "var(--muted)" }}
+        onMouseEnter={undefined}
+      >
+        <ArrowLeft className="h-4 w-4" strokeWidth={2.5} />
+        Back to Matches
       </Link>
 
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-200 to-indigo-300 flex items-center justify-center text-2xl font-bold text-violet-700">
-              {match.name.charAt(0)}
-            </div>
-            <div className="flex-1">
-              <h1 className="text-xl font-bold text-zinc-900">{match.name}</h1>
-              <p className="text-zinc-500 text-sm">{match.age} years old</p>
-            </div>
-            <div className="text-right">
-              <div className="text-4xl font-bold text-violet-600">{pct}%</div>
-              <div className="text-xs text-zinc-400">compatibility</div>
-            </div>
+      {/* Hero card */}
+      <div
+        className="p-6 bg-white border-2 border-[#2d2d2d] rotate-[0.5deg]"
+        style={{ borderRadius: "var(--radius-wobbly-alt)", boxShadow: "var(--shadow-hard)" }}
+      >
+        <div className="flex items-center gap-5">
+          <div
+            className="w-16 h-16 flex items-center justify-center flex-shrink-0 border-2 border-[#2d2d2d]"
+            style={{ background: "var(--postit)", borderRadius: "var(--radius-wobbly-sm)" }}
+          >
+            <span className="font-heading text-2xl font-bold" style={{ color: "var(--ink)" }}>
+              {initials}
+            </span>
           </div>
-        </CardContent>
-      </Card>
+          <div className="flex-1">
+            <h1 className="font-heading text-3xl font-bold leading-tight" style={{ color: "var(--ink)" }}>
+              {match.name}
+            </h1>
+            <p className="text-base mt-0.5" style={{ color: "var(--muted)" }}>{match.age} years old</p>
+          </div>
+          {/* Score badge */}
+          <div
+            className="flex-shrink-0 w-20 h-20 flex flex-col items-center justify-center border-2 border-[#2d2d2d]"
+            style={{ background: "var(--accent)", borderRadius: "50%", boxShadow: "var(--shadow-hard)" }}
+          >
+            <span className="font-heading text-3xl font-bold text-white leading-none">{pct}</span>
+            <span className="text-xs text-white/80 font-medium">match</span>
+          </div>
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Compatibility Breakdown</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {match.dimension_scores.map((d) => (
-            <div key={d.label} className="space-y-1">
-              <ScoreBar score={d.score} label={d.label} />
-              {d.description && (
-                <p className="text-xs text-zinc-400 pl-0.5">{d.description}</p>
-              )}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {match.shared_values.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Shared Values</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {match.shared_values.map((v) => (
-                <Badge key={v} variant="success">{v}</Badge>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Compatibility breakdown */}
+      {match.dimension_scores.length > 0 && (
+        <div
+          className="p-6 bg-white border-2 border-[#2d2d2d] -rotate-[0.5deg]"
+          style={{ borderRadius: "var(--radius-wobbly)", boxShadow: "var(--shadow-hard)" }}
+        >
+          <p className="font-heading text-lg font-bold mb-5" style={{ color: "var(--ink)" }}>
+            Compatibility Breakdown
+          </p>
+          <div className="space-y-5">
+            {match.dimension_scores.map((d) => (
+              <ScoreBar key={d.label} score={d.score} label={d.label} description={d.description} />
+            ))}
+          </div>
+        </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Attachment Style</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Badge variant="secondary" className="text-sm px-3 py-1">
-            {match.attachment_style}
-          </Badge>
-        </CardContent>
-      </Card>
+      {/* Shared values */}
+      {match.shared_values.length > 0 && (
+        <div
+          className="p-6 bg-white border-2 border-[#2d2d2d] rotate-[0.3deg]"
+          style={{ borderRadius: "var(--radius-wobbly-alt)", boxShadow: "var(--shadow-hard)" }}
+        >
+          <p className="font-heading text-lg font-bold mb-4" style={{ color: "var(--ink)" }}>Shared Values</p>
+          <div className="flex flex-wrap gap-2">
+            {match.shared_values.map((v) => (
+              <span
+                key={v}
+                className="px-3 py-1.5 text-base border-2 border-[#2d2d2d]"
+                style={{
+                  borderRadius: "var(--radius-wobbly-sm)",
+                  background: "var(--postit)",
+                  color: "var(--ink)",
+                  boxShadow: "var(--shadow-hard-sm)",
+                }}
+              >
+                {v}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Attachment style */}
+      <div
+        className="p-6 bg-white border-2 border-[#2d2d2d] -rotate-[0.3deg]"
+        style={{ borderRadius: "var(--radius-wobbly-sm)", boxShadow: "var(--shadow-hard)" }}
+      >
+        <p className="font-heading text-lg font-bold mb-4" style={{ color: "var(--ink)" }}>Attachment Style</p>
+        <span
+          className="inline-flex px-4 py-2 text-base font-medium border-2 border-[#2d5da1]"
+          style={{
+            borderRadius: "var(--radius-wobbly-sm)",
+            background: "rgba(45,93,161,0.08)",
+            color: "var(--secondary)",
+            boxShadow: "2px 2px 0px 0px #2d5da1",
+          }}
+        >
+          {match.attachment_style}
+        </span>
+      </div>
     </div>
   );
 }

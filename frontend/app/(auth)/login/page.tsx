@@ -9,97 +9,108 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
 const schema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(1, "Password is required"),
+  email: z.string().email(),
+  password: z.string().min(1, "Required"),
 });
-
-type FormData = z.infer<typeof schema>;
+type F = z.infer<typeof schema>;
 
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { register, handleSubmit, formState: { errors } } = useForm<F>({ resolver: zodResolver(schema) });
 
-  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
-    resolver: zodResolver(schema),
-  });
-
-  async function onSubmit(data: FormData) {
-    setIsLoading(true);
-    setError(null);
-    const result = await signIn("credentials", { ...data, redirect: false });
-    setIsLoading(false);
-    if (result?.error) {
-      setError("Invalid email or password");
-    } else {
-      router.push("/matches");
-    }
-  }
-
-  async function signInWithGoogle() {
-    await signIn("google", { callbackUrl: "/matches" });
+  async function onSubmit(data: F) {
+    setLoading(true); setError(null);
+    const res = await signIn("credentials", { ...data, redirect: false });
+    setLoading(false);
+    if (res?.error) setError("Credentials not recognised.");
+    else router.push("/selection");
   }
 
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader className="text-center">
-        <CardTitle className="text-2xl">Welcome back</CardTitle>
-        <CardDescription>Sign in to your Equilibrium account</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <Button variant="outline" className="w-full" onClick={signInWithGoogle}>
+    <div className="w-full max-w-sm mx-auto space-y-8">
+      {/* Brand mark */}
+      <div className="text-center space-y-3">
+        <div
+          className="w-14 h-14 mx-auto flex items-center justify-center border-2 border-[#2d2d2d]"
+          style={{
+            borderRadius: "50%",
+            background: "var(--postit)",
+            boxShadow: "var(--shadow-hard-sm)",
+          }}
+        >
+          <span className="font-heading text-2xl font-bold">⚖</span>
+        </div>
+        <h1 className="font-heading text-4xl font-bold" style={{ color: "var(--ink)" }}>Sign In</h1>
+        <p className="text-base" style={{ color: "var(--muted)" }}>Access your Equilibrium account</p>
+      </div>
+
+      {/* Form card */}
+      <div
+        className="p-7 space-y-5 bg-white border-2 border-[#2d2d2d] -rotate-[0.5deg]"
+        style={{ borderRadius: "var(--radius-wobbly-alt)", boxShadow: "var(--shadow-hard)" }}
+      >
+        {/* Google */}
+        <button
+          onClick={() => signIn("google", { callbackUrl: "/selection" })}
+          className="w-full h-12 flex items-center justify-center gap-3 text-base font-medium border-2 border-[#2d2d2d] bg-[#e5e0d8] transition-all duration-75 hover:bg-[#2d5da1] hover:text-white hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
+          style={{ borderRadius: "var(--radius-wobbly-btn)", boxShadow: "var(--shadow-hard-sm)" }}
+        >
           <GoogleIcon />
           Continue with Google
-        </Button>
+        </button>
 
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t border-zinc-200" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-white px-2 text-zinc-400">Or</span>
-          </div>
+        <div className="flex items-center gap-4">
+          <div className="flex-1 border-t-2 border-dashed border-[#e5e0d8]" />
+          <span className="text-sm font-medium" style={{ color: "var(--dim)" }}>or</span>
+          <div className="flex-1 border-t-2 border-dashed border-[#e5e0d8]" />
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-zinc-700">Email</label>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Email</label>
             <Input type="email" placeholder="you@example.com" {...register("email")} />
-            {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+            {errors.email && <p className="text-sm" style={{ color: "var(--accent)" }}>{errors.email.message}</p>}
           </div>
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-zinc-700">Password</label>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Password</label>
             <Input type="password" placeholder="••••••••" {...register("password")} />
-            {errors.password && <p className="text-xs text-red-500">{errors.password.message}</p>}
+            {errors.password && <p className="text-sm" style={{ color: "var(--accent)" }}>{errors.password.message}</p>}
           </div>
-          {error && <p className="text-sm text-red-500 text-center">{error}</p>}
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? "Signing in…" : "Sign In"}
+          {error && (
+            <div
+              className="py-3 px-4 border-2 border-[#ff4d4d] text-sm text-center"
+              style={{ borderRadius: "var(--radius-wobbly-sm)", background: "rgba(255,77,77,0.05)", color: "#ff4d4d" }}
+            >
+              {error}
+            </div>
+          )}
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? "Signing in…" : "Sign In"}
           </Button>
         </form>
-      </CardContent>
-      <CardFooter className="justify-center">
-        <p className="text-sm text-zinc-500">
-          No account?{" "}
-          <Link href="/register" className="text-violet-600 hover:underline font-medium">
-            Create one
-          </Link>
-        </p>
-      </CardFooter>
-    </Card>
+      </div>
+
+      <p className="text-center text-base" style={{ color: "var(--muted)" }}>
+        No account?{" "}
+        <Link href="/register" className="font-medium underline" style={{ color: "#2d5da1" }}>
+          Apply here
+        </Link>
+      </p>
+    </div>
   );
 }
 
 function GoogleIcon() {
   return (
-    <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
-      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+    <svg className="h-4 w-4 flex-shrink-0" viewBox="0 0 24 24">
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
     </svg>
   );
 }

@@ -1,17 +1,46 @@
-import { InterviewChat } from "@/components/interview/InterviewChat";
+import { auth } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { PhotoUpload } from "@/components/onboarding/PhotoUpload";
 
-export default function OnboardingPage() {
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+export default async function OnboardingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ retake?: string }>;
+}) {
+  const session = await auth();
+  if (!session?.accessToken) redirect("/login");
+  const params = await searchParams;
+  const isRetake = params.retake === "true";
+
+  const [photosRes, profileRes] = await Promise.all([
+    fetch(`${API_URL}/api/v1/photos/status`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      cache: "no-store",
+    }),
+    fetch(`${API_URL}/api/v1/profile/analysis-status`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      cache: "no-store",
+    }),
+  ]);
+
+  if (!isRetake && profileRes.ok) {
+    const profile = await profileRes.json();
+    const s = profile.analysis_status;
+    if (s === "processing" || s === "complete") {
+      redirect("/selection");
+    }
+  }
+
+  if (photosRes.ok) {
+    const status = await photosRes.json();
+    if (status.ready) redirect(isRetake ? "/onboarding/interview?retake=true" : "/onboarding/interview");
+  }
+
   return (
-    <div className="max-w-2xl mx-auto">
-      <div className="mb-6 text-center">
-        <h1 className="text-2xl font-bold text-zinc-900">Your Interview</h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Answer naturally — there are no right or wrong answers. This usually takes 20-30 minutes.
-        </p>
-      </div>
-      <div className="bg-white rounded-xl border border-zinc-200 p-4 shadow-sm">
-        <InterviewChat />
-      </div>
+    <div className="py-4">
+      <PhotoUpload accessToken={session.accessToken} />
     </div>
   );
 }

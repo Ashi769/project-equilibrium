@@ -30,8 +30,17 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     gemini_api_key: str = ""
 
+    # Cloudflare R2
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket_name: str = "equilibrium-photos"
+
     # Encryption
     transcript_encryption_key: str = ""
+
+    # Interview (set to 2 for fast dev testing, 6 for production)
+    interview_min_topics: int = 6
 
     @property
     def cors_origins(self) -> list[str]:

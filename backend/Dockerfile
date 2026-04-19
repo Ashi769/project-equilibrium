@@ -24,8 +24,8 @@ RUN uv run pip install -r requirements-ml.txt
 # Download spaCy model
 RUN uv run python -m spacy download en_core_web_sm
 
-# Pre-download sentence-transformers model
-RUN uv run python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Pre-download sentence-transformers model (best-effort, downloads on first use if this fails)
+RUN uv run python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || echo "Model will download on first use"
 
 COPY . .
 
