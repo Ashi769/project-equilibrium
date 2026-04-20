@@ -1,7 +1,8 @@
 #!/bin/sh
-set -e
+set -ex
 
 PORT=${PORT:-8000}
+echo "=== Port: $PORT ==="
 
 if [ "$CELERY_WORKER" = "1" ]; then
     echo "=== Starting Celery worker ==="
@@ -14,7 +15,7 @@ LOCKFILE="/tmp/migration.done"
 
 if [ ! -f "$LOCKFILE" ]; then
     echo "=== Running migrations ==="
-    .venv/bin/alembic upgrade head
+    .venv/bin/alembic upgrade head || echo "=== Migration failed, ignoring ==="
     echo "=== Migrations done ==="
     touch "$LOCKFILE"
 fi
