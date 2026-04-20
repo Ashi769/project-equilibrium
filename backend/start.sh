@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set -ex
 
 MIGRATION_LOCK="/tmp/migration.lock"
 
