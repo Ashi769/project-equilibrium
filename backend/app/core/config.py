@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://equilibrium:equilibrium@localhost:5432/equilibrium"
 
+    @property
+    def async_database_url(self) -> str:
+        url = self.database_url
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
