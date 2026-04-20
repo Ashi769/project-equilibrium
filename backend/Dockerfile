@@ -30,8 +30,10 @@ RUN uv run python -c "from sentence_transformers import SentenceTransformer; Sen
 
 COPY . .
 
+RUN chmod +x start.sh
+
 EXPOSE 8000
 
 ENV HF_HOME=/app/.cache/huggingface
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./start.sh"]
