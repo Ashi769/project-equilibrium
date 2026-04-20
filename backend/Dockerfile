@@ -18,14 +18,14 @@ COPY pyproject.toml uv.lock* requirements-ml.txt ./
 # Install main deps
 RUN uv sync --frozen --no-dev
 
-# Install ML deps (torch + sentence-transformers, Linux wheels only)
-RUN uv pip install --system -r requirements-ml.txt
+# Install ML deps into the venv (CPU-only torch)
+RUN uv pip install -r requirements-ml.txt
 
-# Download spaCy model
+# Download spaCy model into venv
 RUN uv run python -m spacy download en_core_web_sm
 
-# Pre-download sentence-transformers model (best-effort, downloads on first use if this fails)
-RUN uv run python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || echo "Model will download on first use"
+# Pre-download sentence-transformers model at build time
+RUN uv run python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 COPY . .
 
