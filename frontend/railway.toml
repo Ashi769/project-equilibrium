@@ -1,6 +1,7 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
+rootDir = "frontend"
 
 [deploy]
 numReplicas = 1
