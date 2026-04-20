@@ -24,11 +24,14 @@ RUN uv pip install -r requirements-ml.txt
 # Download spaCy model into venv
 RUN uv run python -m spacy download en_core_web_sm
 
-# Pre-download sentence-transformers model at build time
+# Pre-download sentence-transformers model into image (cache baked into /app/.cache)
+ENV HF_HOME=/app/.cache/huggingface
 RUN uv run python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 COPY . .
 
 EXPOSE 8000
+
+ENV HF_HOME=/app/.cache/huggingface
 
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
