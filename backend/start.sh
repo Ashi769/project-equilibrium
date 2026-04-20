@@ -2,6 +2,12 @@
 set -e
 
 PORT=${PORT:-8000}
+
+if [ "$CELERY_WORKER" = "1" ]; then
+    echo "=== Starting Celery worker ==="
+    exec .venv/bin/celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+fi
+
 echo "=== Starting on port $PORT ==="
 
 LOCKFILE="/tmp/migration.done"
