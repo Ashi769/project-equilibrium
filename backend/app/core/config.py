@@ -1,16 +1,20 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+import os
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # App
+    port: int = int(os.environ.get("PORT", "8000"))
     environment: str = "development"
     allowed_origins: str = "http://localhost:3000"
 
     # Database
-    database_url: str = "postgresql+asyncpg://equilibrium:equilibrium@localhost:5432/equilibrium"
+    database_url: str = (
+        "postgresql+asyncpg://equilibrium:equilibrium@localhost:5432/equilibrium"
+    )
 
     @property
     def async_database_url(self) -> str:
