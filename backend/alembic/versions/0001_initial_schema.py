@@ -46,7 +46,13 @@ def upgrade() -> None:
         sa.Column("aspiration_vector", Vector(384), nullable=True),
         sa.Column(
             "analysis_status",
-            sa.Enum("pending", "processing", "complete", "failed", name="analysis_status_enum"),
+            sa.Enum(
+                "pending",
+                "processing",
+                "complete",
+                "failed",
+                name="analysis_status_enum",
+            ),
             nullable=False,
             server_default="pending",
         ),
@@ -68,7 +74,13 @@ def upgrade() -> None:
         sa.Column("transcript_encrypted", sa.LargeBinary(), nullable=True),
         sa.Column(
             "processing_status",
-            sa.Enum("pending", "processing", "complete", "failed", name="processing_status_enum"),
+            sa.Enum(
+                "pending",
+                "processing",
+                "complete",
+                "failed",
+                name="processing_status_enum",
+            ),
             nullable=False,
             server_default="pending",
         ),
@@ -95,10 +107,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("DROP INDEX IF EXISTS psychometric_identity_vector_idx")
     op.drop_table("matches")
     op.drop_table("interview_sessions")
     op.drop_table("psychometric_profiles")
     op.drop_table("users")
     op.execute("DROP TYPE IF EXISTS analysis_status_enum")
     op.execute("DROP TYPE IF EXISTS processing_status_enum")
-    op.execute("DROP EXTENSION IF EXISTS vector")

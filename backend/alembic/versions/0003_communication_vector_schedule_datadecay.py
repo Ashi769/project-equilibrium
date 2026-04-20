@@ -33,12 +33,23 @@ def upgrade() -> None:
     )
     op.add_column(
         "psychometric_profiles",
-        sa.Column("reinterview_nudged", sa.Boolean(), nullable=False, server_default="false"),
+        sa.Column(
+            "reinterview_nudged", sa.Boolean(), nullable=False, server_default="false"
+        ),
     )
 
     # Meetings table for scheduling and verdict tracking
-    meeting_status = sa.Enum("proposed", "confirmed", "completed", "cancelled", name="meeting_status_enum", create_constraint=True)
-    verdict_choice = sa.Enum("commit", "pool", name="verdict_choice_enum", create_constraint=True)
+    meeting_status = sa.Enum(
+        "proposed",
+        "confirmed",
+        "completed",
+        "cancelled",
+        name="meeting_status_enum",
+        create_constraint=True,
+    )
+    verdict_choice = sa.Enum(
+        "commit", "pool", name="verdict_choice_enum", create_constraint=True
+    )
 
     op.create_table(
         "meetings",
@@ -52,18 +63,23 @@ def upgrade() -> None:
         sa.Column("status", meeting_status, nullable=False, server_default="proposed"),
         sa.Column("proposer_verdict", verdict_choice, nullable=True),
         sa.Column("match_verdict", verdict_choice, nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["proposer_id"], ["users.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["match_id"], ["users.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["match_id"], ["matches.id"], ondelete="CASCADE"),
         sa.UniqueConstraint("proposer_id", "match_id", name="uq_meeting_pair"),
     )
 
 
 def downgrade() -> None:
     op.drop_table("meetings")
-    sa.Enum(name="meeting_status_enum").drop(op.get_bind(), checkfirst=True)
-    sa.Enum(name="verdict_choice_enum").drop(op.get_bind(), checkfirst=True)
+    op.execute("DROP TYPE IF EXISTS meeting_status_enum")
+    op.execute("DROP TYPE IF EXISTS verdict_choice_enum")
     op.drop_column("psychometric_profiles", "reinterview_nudged")
     op.drop_column("psychometric_profiles", "reinterview_due_at")
     op.drop_column("psychometric_profiles", "last_interview_at")
