@@ -39,8 +39,12 @@ app.include_router(signal.router)
 @app.get("/health")
 async def health():
     from app.core.database import engine
-    from sqlalchemy import text
+    from sqlalchemy import text, exc
 
-    async with engine.connect() as conn:
-        await conn.execute(text("SELECT 1"))
-    return {"status": "ok"}
+    db_status = "ok"
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except exc.SQLAlchemyError:
+        db_status = "error"
+    return {"status": db_status}
