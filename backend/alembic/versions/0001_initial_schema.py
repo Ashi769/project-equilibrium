@@ -16,11 +16,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Enable pgvector extension (must run outside transaction)
-    conn = op.get_bind()
-    conn.execution_options(isolation_level="AUTOCOMMIT").execute(
-        sa.text("CREATE EXTENSION IF NOT EXISTS vector")
-    )
+    # Enable pgvector extension
+    op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
 
     op.create_table(
         "users",
