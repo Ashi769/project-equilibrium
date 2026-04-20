@@ -1,3 +1,4 @@
-# ML dependencies installed in Docker (Linux) only.
-# sentence-transformers requires torch which only has Linux/ARM64 macOS wheels.
+# CPU-only torch keeps image size ~200MB instead of ~2GB (no CUDA needed for inference)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 sentence-transformers>=3.0.0
