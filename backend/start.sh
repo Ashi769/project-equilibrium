@@ -1,7 +1,7 @@
 #!/bin/sh
 set -ex
 
-PORT=${PORT:-8000}
+PORT=${PORT:-8080}
 HOST=${HOST:-0.0.0.0}
 echo "=== Starting on $HOST:$PORT ==="
 
