@@ -1,6 +1,5 @@
 import asyncio
 import os
-import time
 from logging.config import fileConfig
 
 import sqlalchemy as sa
@@ -11,7 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 
 from app.core.config import settings
-import app.models  # noqa: F401 — ensures all models are imported for autogenerate
+import app.models  # noqa: F401
 
 config = context.config
 
@@ -53,34 +52,19 @@ async def run_async_migrations() -> None:
         settings.async_database_url,
         poolclass=pool.NullPool,
         pool_pre_ping=True,
-        connect_args={
-            "server_settings": {
-                "application_name": "alembic",
-                "search_path": "public, extensions",
-            }
-        },
     )
 
     async with connectable.connect() as conn:
         await conn.execute(sa.text("COMMIT"))
-        await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.execute(sa.text("SET search_path TO public, extensions"))
+        await conn.execute(
+            sa.text(
+                "DO $$ BEGIN CREATE EXTENSION IF NOT EXISTS vector; EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+            )
+        )
         await conn.commit()
 
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            async with connectable.connect() as connection:
-                await connection.run_sync(do_run_migrations)
-            break
-        except Exception as e:
-            if attempt == max_retries - 1:
-                raise
-            wait_time = (attempt + 1) * 3
-            print(
-                f"Migration attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s..."
-            )
-            await asyncio.sleep(wait_time)
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()
 
