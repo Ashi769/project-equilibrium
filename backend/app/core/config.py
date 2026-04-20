@@ -17,9 +17,6 @@ class Settings(BaseSettings):
         url = self.database_url
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        if "ssl=" not in url and "sslmode=" not in url:
-            sep = "&" if "?" in url else "?"
-            url = f"{url}{sep}ssl=require"
         return url
 
     # Redis / Celery
