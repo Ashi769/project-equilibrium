@@ -2,7 +2,8 @@
 set -ex
 
 PORT=${PORT:-8000}
-echo "=== Port: $PORT ==="
+HOST=${HOST:-0.0.0.0}
+echo "=== Starting on $HOST:$PORT ==="
 
 if [ "$CELERY_WORKER" = "1" ]; then
     echo "=== Starting Celery worker ==="
@@ -21,4 +22,4 @@ if [ ! -f "$LOCKFILE" ]; then
 fi
 
 echo "=== Starting uvicorn ==="
-exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port $PORT
+exec .venv/bin/uvicorn app.main:app --host $HOST --port $PORT
