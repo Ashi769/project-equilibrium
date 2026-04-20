@@ -50,6 +50,11 @@ async def run_async_migrations() -> None:
 
     connectable = create_async_engine(settings.async_database_url, poolclass=pool.NullPool)
 
+    # CREATE EXTENSION must run outside a transaction (AUTOCOMMIT)
+    async with connectable.connect() as conn:
+        await conn.execute(sa.text("COMMIT"))
+        await conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
 
