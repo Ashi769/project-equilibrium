@@ -208,7 +208,7 @@ export function PhotoUpload({ accessToken }: { accessToken: string }) {
             className="relative overflow-hidden border-2 border-[#2d2d2d]"
             style={{ borderRadius: "var(--radius-wobbly-sm)", background: "#000" }}
           >
-            <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-60 object-cover" />
+            <video ref={videoRef} autoPlay playsInline muted className="w-full aspect-[3/4] object-cover" />
             <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-3">
               <Button onClick={capturePhoto} size="sm">Capture</Button>
               <Button variant="secondary" size="sm" onClick={closeCamera}>Cancel</Button>
