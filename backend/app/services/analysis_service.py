@@ -2,6 +2,7 @@
 Analyzes an anonymized interview transcript using Gemini 2.0 Flash.
 Extracts OCEAN scores, attachment style, values profile, and effort score.
 """
+
 import asyncio
 import json
 import re
@@ -49,22 +50,25 @@ TRANSCRIPT:
 
 def _extract_json(text: str) -> dict:
     """Try several strategies to extract JSON from a model response."""
+    text = text.strip()
+
     # 1. Direct parse
     try:
-        return json.loads(text.strip())
+        return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # 2. Strip markdown code block
-    code_block = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
-    if code_block:
-        try:
-            return json.loads(code_block.group(1).strip())
-        except json.JSONDecodeError:
-            pass
+    # 2. Strip markdown code block (handle both ```json and ```)
+    for pattern in [r"```json\s*([\s\S]+?)\s*```", r"```\s*([\s\S]+?)\s*```"]:
+        code_block = re.search(pattern, text)
+        if code_block:
+            try:
+                return json.loads(code_block.group(1).strip())
+            except json.JSONDecodeError:
+                pass
 
-    # 3. Find first {...} blob
-    brace_match = re.search(r"\{[\s\S]+\}", text)
+    # 3. Handle incomplete JSON (trailing cutoff) - try to find complete objects
+    brace_match = re.search(r"\{[\s\S]*\}", text)
     if brace_match:
         try:
             return json.loads(brace_match.group())
