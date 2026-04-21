@@ -26,31 +26,20 @@ async function getBackendTokens(
       : provider === "refresh"
         ? "/api/v1/auth/refresh"
         : "/api/v1/auth/login";
-  // DEBUG getBackendTokens:", { provider, endpoint, hasPayload: !!Object.keys(payload).length });
   const res = await fetch(`${API_URL}${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  // DEBUG getBackendTokens response:", { status: res.status, ok: res.ok });
   if (!res.ok) {
-    const error = await res.text();
-    // DEBUG getBackendTokens error:", error);
     return null;
   }
-  const data = await res.json();
-  // DEBUG getBackendTokens success:", { hasAccessToken: !!data.access_token, hasRefreshToken: !!data.refresh_token });
-  return data;
+  return res.json();
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
   secret: process.env.AUTH_SECRET,
-  events: {
-    async signIn({ user, account, profile, isNewUser }) {
-      // DEBUG events.signIn:", { hasUser: !!user, hasAccount: !!account, hasProfile: !!profile, isNewUser, provider: account?.provider });
-    },
-  },
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID!,
@@ -92,11 +81,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async signIn({ user, account, profile }) {
-      // DEBUG signIn callback:", { user: !!user, account: !!account, provider: account?.provider });
       if (account?.provider === "google" && account.id_token) {
         const data = await getBackendTokens("google", { id_token: account.id_token });
         if (data) {
-          // DEBUG Google signin successful, storing tokens");
           (user as any).accessToken = data.access_token;
           (user as any).refreshToken = data.refresh_token;
           (user as any).userId = data.user.id;
@@ -105,35 +92,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return true;
     },
     async jwt({ token, user, account, isNewUser }) {
-      // DEBUG jwt callback:", { 
-        hasUser: !!user, 
-        hasAccount: !!account, 
-        provider: account?.provider, 
-        idToken: !!account?.id_token, 
-        isNewUser, 
-        tokenSub: token.sub,
-        tokenEmail: token.email,
-        tokenKeys: Object.keys(token),
-      });
-
       // Google OAuth - call backend /google endpoint to get backend tokens
       // NextAuth v5 doesn't give us account.id_token, but we have sub and email in token
       if (!token.accessToken && token.sub && token.email) {
-        // DEBUG jwt: calling /google endpoint with google info");
         const data = await getBackendTokens("google", {
           google_id: token.sub,
           email: token.email,
           name: token.name || "",
         });
         if (data) {
-          // DEBUG jwt: got tokens from /google");
           token.accessToken = data.access_token;
           token.refreshToken = data.refresh_token;
           token.userId = data.user.id;
           token.accessTokenExpires = Date.now() + 14 * 60 * 1000;
           return token;
-        } else {
-          // DEBUG jwt: /google call FAILED");
         }
       }
 
@@ -184,17 +156,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
 
     async session({ session, token }) {
-      // DEBUG session callback:", {
-        hasToken: !!token,
-        hasAccessToken: !!token.accessToken,
-        hasRefreshToken: !!token.refreshToken,
-        hasUserId: !!token.userId,
-        accessTokenExpires: token.accessTokenExpires,
-        currentTime: Date.now(),
-      });
       session.accessToken = (token.accessToken as string) ?? "";
       session.userId = (token.userId as string) ?? "";
-      // DEBUG session callback - set session:", { accessToken: !!session.accessToken, userId: session.userId });
       return session;
     },
   },
