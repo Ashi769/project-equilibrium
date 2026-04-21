@@ -135,19 +135,98 @@ export function SelectionClient({
 
   const displayed = matches.slice(0, 5);
 
+  /* ─── Mobile: scrollable card grid ─── */
+  const MobileCard = ({ match }: { match: MatchSummary }) => {
+    const [expanded, setExpanded] = useState(false);
+    const pct = Math.round(match.compatibility_score * 100);
+    const logic = matchLogic(match.top_dimensions);
+    const initials = match.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+
+    return (
+      <div
+        className="border-2 border-[#2d2d2d] overflow-hidden cursor-pointer"
+        style={{
+          borderRadius: "var(--radius-wobbly-sm)",
+          boxShadow: "var(--shadow-hard-sm)",
+          background: "var(--surface)",
+        }}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="p-4">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-12 h-12 flex items-center justify-center border-2 border-[#2d2d2d] flex-shrink-0"
+              style={{ background: "var(--postit)", borderRadius: "var(--radius-wobbly-sm)" }}
+            >
+              <span className="font-heading font-bold" style={{ color: "var(--ink)" }}>{initials}</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-heading font-bold truncate" style={{ color: "var(--ink)" }}>
+                {match.name}
+              </p>
+              <p className="text-sm" style={{ color: "var(--muted)" }}>{match.age} yrs</p>
+            </div>
+            <div
+              className="w-10 h-10 flex items-center justify-center border-2 border-[#2d2d2d] flex-shrink-0"
+              style={{ background: "#2d2d2d", borderRadius: "50%" }}
+            >
+              <span className="font-heading text-sm font-bold text-white">{pct}</span>
+            </div>
+          </div>
+        </div>
+
+        {expanded && (
+          <div className="px-4 pb-4 border-t-2 border-dashed border-[#2d2d2d]">
+            <div className="pt-3 mb-3">
+              <p className="text-xs font-medium uppercase tracking-widest mb-2" style={{ color: "var(--muted)" }}>
+                Match Logic
+              </p>
+              <ul className="space-y-1">
+                {logic.map((l) => (
+                  <li key={l} className="text-sm flex items-start gap-2" style={{ color: "var(--ink)" }}>
+                    <span style={{ color: "var(--muted)" }}>→</span>
+                    {l}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <Button
+              className="w-full"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                router.push(`/schedule?match=${match.id}&name=${encodeURIComponent(match.name)}`);
+              }}
+            >
+              Request Meet
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   /* ─── Main accordion view ─── */
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="font-heading text-4xl font-bold" style={{ color: "var(--ink)" }}>
+      <div className="mb-6 md:mb-8">
+        <h1 className="font-heading text-3xl md:text-4xl font-bold" style={{ color: "var(--ink)" }}>
           Your Selection
         </h1>
         <p className="text-base mt-1" style={{ color: "var(--muted)" }}>
-          {displayed.length} curated matches · hover to focus · request a meet to proceed
+          {displayed.length} curated matches · tap to expand · request a meet
         </p>
       </div>
 
-      <div className="flex gap-3 border-2 border-[#2d2d2d]" style={{ height: "520px", boxShadow: "var(--shadow-hard-lg)" }}>
+      {/* Mobile: vertical card list */}
+      <div className="md:hidden grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {displayed.map((match) => (
+          <MobileCard key={match.id} match={match} />
+        ))}
+      </div>
+
+      {/* Desktop: horizontal accordion */}
+      <div className="hidden md:flex gap-3 border-2 border-[#2d2d2d]" style={{ height: "520px", boxShadow: "var(--shadow-hard-lg)" }}>
         {displayed.map((match, i) => {
           const pct      = Math.round(match.compatibility_score * 100);
           const logic    = matchLogic(match.top_dimensions);
