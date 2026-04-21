@@ -101,6 +101,7 @@ export function ProfileForm({
 
   // ── Photo editing state ──────────────────────────────────────────────────
   const [editingPhotos, setEditingPhotos] = useState(false);
+  const [editingAbout, setEditingAbout] = useState(false);
   const [newFiles, setNewFiles] = useState<File[]>([]);
   const [newSelfie, setNewSelfie] = useState<File | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
@@ -215,72 +216,118 @@ export function ProfileForm({
         className="bg-white border-2 border-[#2d2d2d] overflow-hidden"
         style={{ borderRadius: "var(--radius-wobbly-alt)", boxShadow: "var(--shadow-hard)" }}
       >
-        <div className="px-6 py-4 border-b-2 border-dashed border-[#e5e0d8]">
+        <div className="px-6 py-4 border-b-2 border-dashed border-[#e5e0d8] flex items-center justify-between">
           <span className="font-heading text-lg font-bold" style={{ color: "var(--ink)" }}>About You</span>
+          {!editingAbout && (
+            <button
+              onClick={() => setEditingAbout(true)}
+              className="text-sm font-medium"
+              style={{ color: "var(--secondary)" }}
+            >
+              Edit
+            </button>
+          )}
         </div>
         <div className="p-5 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Height (cm)</label>
-              <Input 
-                type="number" 
-                placeholder="165" 
-                className="w-full"
-                defaultValue={profile.height ?? undefined}
-              />
+          {editingAbout ? (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Height (cm)</label>
+                  <Input 
+                    type="number" 
+                    placeholder="165" 
+                    className="w-full"
+                    defaultValue={profile.height ?? undefined}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Drinking</label>
+                  <select style={wobblySelect} defaultValue={profile.drinking ?? ""}>
+                    <option value="">Select</option>
+                    <option value="never">Never</option>
+                    <option value="sometimes">Sometimes</option>
+                    <option value="often">Often</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Smoking</label>
+                  <select style={wobblySelect} defaultValue={profile.smoking ?? ""}>
+                    <option value="">Select</option>
+                    <option value="never">Never</option>
+                    <option value="sometimes">Sometimes</option>
+                    <option value="often">Often</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Religion</label>
+                  <select style={wobblySelect} defaultValue={profile.religion ?? ""}>
+                    <option value="">Select</option>
+                    {RELIGIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Food preference</label>
+                  <select style={wobblySelect} defaultValue={profile.food_preference ?? ""}>
+                    <option value="">Select</option>
+                    <option value="veg">Vegetarian</option>
+                    <option value="non-veg">Non-vegetarian</option>
+                    <option value="vegan">Vegan</option>
+                    <option value="egg">Egg</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={() => {
+                    const h = parseInt((document.querySelector('[placeholder="165"]') as HTMLInputElement)?.value) || undefined;
+                    const d = (document.querySelector('select:nth-of-type(4)') as HTMLSelectElement)?.value || undefined;
+                    const s = (document.querySelector('select:nth-of-type(5)') as HTMLSelectElement)?.value || undefined;
+                    const r = (document.querySelector('select:nth-of-type(6)') as HTMLSelectElement)?.value || undefined;
+                    const f = (document.querySelector('select:nth-of-type(7)') as HTMLSelectElement)?.value || undefined;
+                    updateAttrMutation.mutate({ 
+                      height: h, drinking: d, smoking: s, religion: r, food_preference: f 
+                    });
+                    setEditingAbout(false);
+                  }}
+                  size="sm"
+                  disabled={updateAttrMutation.isPending}
+                >
+                  {updateAttrMutation.isPending ? "Saving…" : "Save"}
+                </Button>
+                <Button 
+                  onClick={() => setEditingAbout(false)}
+                  size="sm"
+                  variant="outline"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Height</p>
+                <p className="text-base font-medium" style={{ color: "var(--ink)" }}>{profile.height ? `${profile.height} cm` : "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Drinking</p>
+                <p className="text-base font-medium capitalize" style={{ color: "var(--ink)" }}>{profile.drinking || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Smoking</p>
+                <p className="text-base font-medium capitalize" style={{ color: "var(--ink)" }}>{profile.smoking || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Religion</p>
+                <p className="text-base font-medium" style={{ color: "var(--ink)" }}>{profile.religion || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Food preference</p>
+                <p className="text-base font-medium capitalize" style={{ color: "var(--ink)" }}>{profile.food_preference === "non-veg" ? "Non-veg" : profile.food_preference || "—"}</p>
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Drinking</label>
-              <select style={wobblySelect} defaultValue={profile.drinking ?? ""}>
-                <option value="">Select</option>
-                <option value="never">Never</option>
-                <option value="sometimes">Sometimes</option>
-                <option value="often">Often</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Smoking</label>
-              <select style={wobblySelect} defaultValue={profile.smoking ?? ""}>
-                <option value="">Select</option>
-                <option value="never">Never</option>
-                <option value="sometimes">Sometimes</option>
-                <option value="often">Often</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Religion</label>
-              <select style={wobblySelect} defaultValue={profile.religion ?? ""}>
-                <option value="">Select</option>
-                {RELIGIONS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Food preference</label>
-              <select style={wobblySelect} defaultValue={profile.food_preference ?? ""}>
-                <option value="">Select</option>
-                <option value="veg">Vegetarian</option>
-                <option value="non-veg">Non-vegetarian</option>
-                <option value="vegan">Vegan</option>
-                <option value="egg">Egg</option>
-              </select>
-            </div>
-          </div>
-          <Button 
-            onClick={() => {
-              const h = parseInt((document.querySelector('[placeholder="165"]') as HTMLInputElement)?.value) || undefined;
-              const d = (document.querySelector('select:nth-of-type(4)') as HTMLSelectElement)?.value || undefined;
-              const s = (document.querySelector('select:nth-of-type(5)') as HTMLSelectElement)?.value || undefined;
-              const r = (document.querySelector('select:nth-of-type(6)') as HTMLSelectElement)?.value || undefined;
-              const f = (document.querySelector('select:nth-of-type(7)') as HTMLSelectElement)?.value || undefined;
-              updateAttrMutation.mutate({ 
-                height: h, drinking: d, smoking: s, religion: r, food_preference: f 
-              });
-            }}
-            size="sm"
-            disabled={updateAttrMutation.isPending}
-          >
-            {updateAttrMutation.isPending ? "Saving…" : "Save About You"}
-          </Button>
+          )}
         </div>
       </div>
 
@@ -341,6 +388,7 @@ export function ProfileForm({
               <input
                 ref={selfieInputRef} type="file"
                 accept="image/jpeg,image/png,image/webp" className="hidden"
+                capture="user"
                 onChange={(e) => { if (e.target.files?.[0]) setNewSelfie(e.target.files[0]); e.target.value = ""; }}
               />
               <div>
