@@ -4,6 +4,7 @@ import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+console.log("[DEBUG] API_URL:", API_URL);
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -67,6 +68,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ],
   callbacks: {
     async jwt({ token, user, account }) {
+      console.log("[DEBUG] jwt callback:", { user: !!user, account: !!account, provider: account?.provider, idToken: !!account?.id_token });
+
       // Initial sign-in with credentials
       if (user && (user as any).accessToken) {
         token.accessToken = (user as any).accessToken;
