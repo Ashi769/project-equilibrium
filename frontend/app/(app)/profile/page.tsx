@@ -6,10 +6,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export default async function ProfilePage() {
   const session = await auth();
-  console.log("[DEBUG] ProfilePage:", { hasSession: !!session, hasAccessToken: !!session?.accessToken, userId: session?.userId });
+  // DEBUG ProfilePage:", { hasSession: !!session, hasAccessToken: !!session?.accessToken, userId: session?.userId });
 
   if (!session?.accessToken) {
-    console.log("[DEBUG] ProfilePage: Redirecting to /login (no access token)");
+    // DEBUG ProfilePage: Redirecting to /login (no access token)");
     redirect("/login");
   }
 
