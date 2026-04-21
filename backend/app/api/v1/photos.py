@@ -271,3 +271,23 @@ async def get_user_selfie(
         "has_photo": True,
         "url": r2_service.presigned_url(photo.r2_key),
     }
+
+
+@router.get("/user/{user_id}/carousel")
+async def get_user_carousel(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get user's photos for carousel: first gallery photo, then selfie. No auth."""
+    result = await db.execute(
+        select(UserPhoto)
+        .where(UserPhoto.user_id == user_id)
+        .order_by(UserPhoto.is_selfie == False, UserPhoto.uploaded_at)
+        .limit(2)
+    )
+    photos = result.scalars().all()
+    return [
+        {"url": r2_service.presigned_url(p.r2_key), "is_selfie": p.is_selfie}
+        for p in photos
+        if p.r2_key
+    ]
