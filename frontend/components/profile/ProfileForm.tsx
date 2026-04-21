@@ -102,6 +102,7 @@ export function ProfileForm({
   // ── Photo editing state ──────────────────────────────────────────────────
   const [editingPhotos, setEditingPhotos] = useState(false);
   const [editingAbout, setEditingAbout] = useState(false);
+  const [editingPrefs, setEditingPrefs] = useState(false);
   const [newFiles, setNewFiles] = useState<File[]>([]);
   const [newSelfie, setNewSelfie] = useState<File | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
@@ -501,24 +502,34 @@ export function ProfileForm({
         className="bg-white border-2 border-[#2d2d2d] overflow-hidden"
         style={{ borderRadius: "var(--radius-wobbly-alt)", boxShadow: "var(--shadow-hard)" }}
       >
-        <div className="px-6 py-4 border-b-2 border-dashed border-[#e5e0d8]">
+        <div className="px-6 py-4 border-b-2 border-dashed border-[#e5e0d8] flex items-center justify-between">
           <span className="font-heading text-lg font-bold" style={{ color: "var(--ink)" }}>Match Preferences</span>
+          {!editingPrefs && (
+            <button
+              onClick={() => setEditingPrefs(true)}
+              className="text-sm font-medium"
+              style={{ color: "var(--secondary)" }}
+            >
+              Edit
+            </button>
+          )}
         </div>
         <div className="p-5">
-          <form
-            onSubmit={handleSubmit((data) =>
-              updateMutation.mutate({
-                wants_children: data.wants_children === "yes" ? true : data.wants_children === "no" ? false : null,
-                max_age_diff:   data.max_age_diff,
-                seeking_gender: data.seeking_gender === "any" ? [] : [data.seeking_gender],
-                seeking_drinking: data.seeking_drinking === "doesn't matter" ? undefined : data.seeking_drinking,
-                seeking_smoking: data.seeking_smoking === "doesn't matter" ? undefined : data.seeking_smoking,
-                seeking_religion: data.seeking_religion === "doesn't matter" ? undefined : data.seeking_religion,
-                seeking_food: data.seeking_food === "doesn't matter" ? undefined : data.seeking_food,
-              })
-            )}
-            className="space-y-4"
-          >
+          {editingPrefs ? (
+            <form
+              onSubmit={handleSubmit((data) =>
+                updateMutation.mutate({
+                  wants_children: data.wants_children === "yes" ? true : data.wants_children === "no" ? false : null,
+                  max_age_diff:   data.max_age_diff,
+                  seeking_gender: data.seeking_gender === "any" ? [] : [data.seeking_gender],
+                  seeking_drinking: data.seeking_drinking === "doesn't matter" ? undefined : data.seeking_drinking,
+                  seeking_smoking: data.seeking_smoking === "doesn't matter" ? undefined : data.seeking_smoking,
+                  seeking_religion: data.seeking_religion === "doesn't matter" ? undefined : data.seeking_religion,
+                  seeking_food: data.seeking_food === "doesn't matter" ? undefined : data.seeking_food,
+                })
+              )}
+              className="space-y-4"
+            >
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Wants children</label>
@@ -572,10 +583,56 @@ export function ProfileForm({
                 </select>
               </div>
             </div>
-            <Button type="submit" size="sm" disabled={updateMutation.isPending}>
-              {updateMutation.isPending ? "Saving…" : "Save Preferences"}
-            </Button>
+            <div className="flex gap-2">
+              <Button type="submit" size="sm" disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? "Saving…" : "Save"}
+              </Button>
+              <Button 
+                type="button"
+                onClick={() => setEditingPrefs(false)}
+                size="sm"
+                variant="outline"
+              >
+                Cancel
+              </Button>
+            </div>
           </form>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Wants children</p>
+                <p className="text-base font-medium capitalize" style={{ color: "var(--ink)" }}>
+                  {profile.hard_filters?.wants_children === true ? "Yes" : profile.hard_filters?.wants_children === false ? "No" : "Open to it"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Seeking</p>
+                <p className="text-base font-medium" style={{ color: "var(--ink)" }}>
+                  {profile.hard_filters?.seeking_gender?.length ? profile.hard_filters.seeking_gender[0] : "Anyone"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Max age diff</p>
+                <p className="text-base font-medium" style={{ color: "var(--ink)" }}>{profile.hard_filters?.max_age_diff || 10} years</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Drinking</p>
+                <p className="text-base font-medium" style={{ color: "var(--ink)" }}>{profile.hard_filters?.seeking_drinking || "Doesn't matter"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Smoking</p>
+                <p className="text-base font-medium" style={{ color: "var(--ink)" }}>{profile.hard_filters?.seeking_smoking || "Doesn't matter"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Religion</p>
+                <p className="text-base font-medium" style={{ color: "var(--ink)" }}>{profile.hard_filters?.seeking_religion || "Doesn't matter"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide" style={{ color: "var(--muted)" }}>Food</p>
+                <p className="text-base font-medium" style={{ color: "var(--ink)" }}>{profile.hard_filters?.seeking_food || "Doesn't matter"}</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
