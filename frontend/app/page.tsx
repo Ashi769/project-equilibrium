@@ -76,8 +76,8 @@ export default function Home() {
               </span>
             </h1>
             <p className="text-lg md:text-xl max-w-xl mx-auto leading-relaxed" style={{ color: "var(--muted)" }}>
-              No swiping. No algorithms built on photos. An AI interview extracts your
-              psychometric profile — we match by who you are, not how you appear.
+              No swiping. No photo-first matching.
+              An AI interview builds your psychometric profile—so we match you beyond just looks.
             </p>
           </div>
 
