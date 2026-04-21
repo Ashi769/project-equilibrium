@@ -20,15 +20,17 @@ type BackendTokens = {
 };
 
 async function getBackendTokens(
-  provider: "google" | "credentials" | "refresh",
+  provider: "google" | "credentials" | "refresh" | "sync",
   payload: Record<string, string>,
 ): Promise<BackendTokens | null> {
   const endpoint =
     provider === "google"
       ? "/api/v1/auth/google"
-      : provider === "refresh"
-        ? "/api/v1/auth/refresh"
-        : "/api/v1/auth/login";
+      : provider === "sync"
+        ? "/api/v1/auth/sync"
+        : provider === "refresh"
+          ? "/api/v1/auth/refresh"
+          : "/api/v1/auth/login";
   console.log("[DEBUG] getBackendTokens:", { provider, endpoint, hasPayload: !!Object.keys(payload).length });
   const res = await fetch(`${API_URL}${endpoint}`, {
     method: "POST",
@@ -115,16 +117,29 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         idToken: !!account?.id_token, 
         isNewUser, 
         tokenSub: token.sub,
+        tokenEmail: token.email,
         tokenKeys: Object.keys(token),
-        userEmail: user?.email,
       });
-      if (account) {
-        console.log("[DEBUG] account full:", { provider: account.provider, id_token: !!account.id_token, access_token: !!account.access_token, accountId: account.accountId });
-      }
 
-      // Try to use profile data if account not available but we have user/email
-      if (!account && user?.email && !token.accessToken) {
-        console.log("[DEBUG] jwt: trying to get backend tokens using user profile (no id_token from OAuth)");
+      // Google OAuth - call sync endpoint to get backend tokens
+      // NextAuth v5 doesn't give us account.id_token, but we have sub and email in token
+      if (!token.accessToken && token.sub && token.email) {
+        console.log("[DEBUG] jwt: calling sync endpoint with google info");
+        const data = await getBackendTokens("sync", {
+          google_id: token.sub,
+          email: token.email,
+          name: token.name || "",
+        });
+        if (data) {
+          console.log("[DEBUG] jwt: sync successful, got tokens");
+          token.accessToken = data.access_token;
+          token.refreshToken = data.refresh_token;
+          token.userId = data.user.id;
+          token.accessTokenExpires = Date.now() + 14 * 60 * 1000;
+          return token;
+        } else {
+          console.log("[DEBUG] jwt: sync FAILED");
+        }
       }
 
       // Initial sign-in with credentials

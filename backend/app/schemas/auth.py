@@ -18,6 +18,12 @@ class GoogleAuthRequest(BaseModel):
     id_token: str
 
 
+class GoogleSyncRequest(BaseModel):
+    google_id: str
+    email: str
+    name: str | None = None
+
+
 class UserOut(BaseModel):
     id: str
     email: str
