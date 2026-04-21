@@ -28,13 +28,21 @@ async function getBackendTokens(
       : provider === "refresh"
         ? "/api/v1/auth/refresh"
         : "/api/v1/auth/login";
+  console.log("[DEBUG] getBackendTokens:", { provider, endpoint, hasPayload: !!Object.keys(payload).length });
   const res = await fetch(`${API_URL}${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) return null;
-  return res.json();
+  console.log("[DEBUG] getBackendTokens response:", { status: res.status, ok: res.ok });
+  if (!res.ok) {
+    const error = await res.text();
+    console.log("[DEBUG] getBackendTokens error:", error);
+    return null;
+  }
+  const data = await res.json();
+  console.log("[DEBUG] getBackendTokens success:", { hasAccessToken: !!data.access_token, hasRefreshToken: !!data.refresh_token });
+  return data;
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -137,8 +145,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
 
     async session({ session, token }) {
+      console.log("[DEBUG] session callback:", {
+        hasToken: !!token,
+        hasAccessToken: !!token.accessToken,
+        hasRefreshToken: !!token.refreshToken,
+        hasUserId: !!token.userId,
+        accessTokenExpires: token.accessTokenExpires,
+        currentTime: Date.now(),
+      });
       session.accessToken = (token.accessToken as string) ?? "";
       session.userId = (token.userId as string) ?? "";
+      console.log("[DEBUG] session callback - set session:", { accessToken: !!session.accessToken, userId: session.userId });
       return session;
     },
   },

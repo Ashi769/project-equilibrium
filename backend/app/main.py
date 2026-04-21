@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+import logging
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -6,6 +7,8 @@ from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.api.v1 import auth, interview, matches, profile, photos, schedule, signal
+
+logger = logging.getLogger(__name__)
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -15,6 +18,19 @@ app = FastAPI(
     docs_url="/docs" if settings.environment == "development" else None,
     redoc_url=None,
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"[DEBUG] Backend request: {request.method} {request.url.path}")
+    response = await call_next(request)
+    logger.info(
+        f"[DEBUG] Backend response: {request.method} {request.url.path} -> {response.status_code}"
+    )
+    return response
+
+
+logger.info(f"[DEBUG] Backend starting, environment: {settings.environment}")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
