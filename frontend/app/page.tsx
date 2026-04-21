@@ -35,49 +35,16 @@ export default function Home() {
       {/* Hero */}
       <section className="flex-1 flex flex-col items-center justify-center px-6 py-20 text-center relative overflow-hidden">
         <div className="relative max-w-3xl mx-auto space-y-10">
-          {/* Post-it tag */}
-          <div className="flex justify-center">
-            <div
-              className="inline-flex items-center gap-2 px-4 py-2 border-2 border-[#2d2d2d] text-sm font-medium -rotate-1"
-              style={{
-                borderRadius: "var(--radius-wobbly-sm)",
-                background: "var(--postit)",
-                boxShadow: "var(--shadow-hard-sm)",
-              }}
-            >
-              ✏️ Psychometric Matching
-            </div>
-          </div>
-
           {/* Headline */}
           <div className="space-y-5">
             <h1
               className="font-heading font-bold leading-[1.08]"
               style={{ fontSize: "clamp(2.8rem, 7vw, 5.5rem)", color: "var(--ink)" }}
             >
-              Find someone who{" "}
-              <span className="relative inline-block">
-                <em className="not-italic" style={{ color: "var(--accent)" }}>actually fits</em>
-                {/* Hand-drawn wavy underline */}
-                <svg
-                  className="absolute -bottom-2 left-0 w-full overflow-visible"
-                  viewBox="0 0 200 10"
-                  preserveAspectRatio="none"
-                  style={{ height: "10px" }}
-                >
-                  <path
-                    d="M0,5 Q25,0 50,5 Q75,10 100,5 Q125,0 150,5 Q175,10 200,5"
-                    stroke="#ff4d4d"
-                    strokeWidth="3"
-                    fill="none"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </span>
+              Find the few who truly match your vibe.
             </h1>
             <p className="text-lg md:text-xl max-w-xl mx-auto leading-relaxed" style={{ color: "var(--muted)" }}>
-              No swiping. No algorithms built on photos. An AI interview extracts your
-              psychometric profile — we match by who you are, not how you appear.
+              No more endless swiping through the crowd—just meaningful, AI-powered matches.
             </p>
           </div>
 
