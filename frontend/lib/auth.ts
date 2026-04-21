@@ -56,6 +56,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       authorization: {
         params: { prompt: "consent", access_type: "offline", response_type: "code" },
       },
+      profile(profile) {
+        console.log("[DEBUG] Google profile:", { id: profile.sub, email: profile.email });
+        return {
+          id: profile.sub,
+          name: profile.name,
+          email: profile.email,
+          image: profile.picture,
+        };
+      },
     }),
     Credentials({
       credentials: {
@@ -93,8 +102,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
       return true;
     },
-    async jwt({ token, user, account }) {
-      console.log("[DEBUG] jwt callback:", { user: !!user, account: !!account, provider: account?.provider, idToken: !!account?.id_token });
+    async jwt({ token, user, account, isNewUser }) {
+      console.log("[DEBUG] jwt callback:", { hasUser: !!user, hasAccount: !!account, provider: account?.provider, idToken: !!account?.id_token, isNewUser, tokenKeys: Object.keys(token) });
+      if (account) {
+        console.log("[DEBUG] account full:", { provider: account.provider, id_token: !!account.id_token, access_token: !!account.access_token, accountId: account.accountId });
+      }
       if (account) {
         console.log("[DEBUG] account details:", { provider: account.provider, idToken: !!account.id_token, accessToken: !!account.access_token });
       }
