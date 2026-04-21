@@ -147,7 +147,7 @@ export function InterviewChat({ accessToken }: { accessToken: string }) {
   }
 
   return (
-    <div className="flex flex-col" style={{ height: "calc(100vh - 10rem)", maxHeight: "700px" }}>
+    <div className="flex flex-col" style={{ height: "calc(100vh - 14rem)", maxHeight: "700px" }}>
       {/* Progress indicator */}
       <div className="mb-4">
         <div className="flex justify-between items-center mb-2">

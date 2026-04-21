@@ -46,7 +46,7 @@ export default function MeetingsPage() {
 
   if (isLoading || !meetings) {
     return (
-      <div className="max-w-2xl mx-auto py-16 space-y-4">
+      <div className="max-w-full md:max-w-2xl mx-auto px-4 py-12 md:py-16 space-y-4">
         {Array.from({ length: 3 }).map((_, i) => (
           <div
             key={i}
@@ -76,7 +76,7 @@ export default function MeetingsPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-10">
+    <div className="max-w-full md:max-w-2xl mx-auto px-4 md:px-0 space-y-8 md:space-y-10">
       <div>
         <div
           className="inline-flex items-center px-3 py-1.5 border-2 border-[#2d2d2d] text-sm font-medium mb-3"

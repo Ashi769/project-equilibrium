@@ -196,7 +196,7 @@ function ScheduleInner() {
         {Array.from(DAY_GROUPS.entries()).slice(0, 7).map(([day, slots]) => (
           <div key={day}>
             <p className="font-heading text-lg font-bold mb-3" style={{ color: "var(--ink)" }}>{day}</p>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
               {slots.map((slot) => {
                 const isSelected = selected.has(slot.id);
                 const isDisabled = !isSelected && selected.size >= 3;

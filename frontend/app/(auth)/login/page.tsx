@@ -42,7 +42,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="w-full max-w-sm mx-auto space-y-8">
+    <div className="w-full max-w-sm mx-auto px-4 space-y-6 md:space-y-8">
       {/* Brand mark */}
       <div className="text-center space-y-3">
         <div
@@ -61,7 +61,7 @@ export default function LoginPage() {
 
       {/* Form card */}
       <div
-        className="p-7 space-y-5 bg-white border-2 border-[#2d2d2d] -rotate-[0.5deg]"
+        className="p-5 md:p-7 space-y-4 md:space-y-5 bg-white border-2 border-[#2d2d2d] -rotate-[0.5deg]"
         style={{ borderRadius: "var(--radius-wobbly-alt)", boxShadow: "var(--shadow-hard)" }}
       >
         {/* Google */}
