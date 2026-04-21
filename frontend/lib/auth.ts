@@ -3,9 +3,8 @@ import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-console.log("[DEBUG] AUTH_SECRET:", process.env.AUTH_SECRET ? "set" : "NOT SET", "| value:", process.env.AUTH_SECRET);
+console.log("[DEBUG] AUTH_SECRET:", process.env.AUTH_SECRET ? `set (len:${process.env.AUTH_SECRET.length})` : "NOT SET");
+console.log("[DEBUG] AUTH_URL:", process.env.AUTH_URL);
 
 const loginSchema = z.object({
   email: z.string().email(),
