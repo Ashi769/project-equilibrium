@@ -110,6 +110,40 @@ export function ProfileForm({
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const selfieInputRef  = useRef<HTMLInputElement>(null);
 
+  // Camera state for selfie
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  async function openSelfieCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      streamRef.current = stream;
+      setCameraOpen(true);
+      setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = stream; }, 50);
+    } catch { setPhotoError("Camera access denied."); }
+  }
+
+  function closeSelfieCamera() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setCameraOpen(false);
+  }
+
+  function captureSelfie() {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    canvas.getContext("2d")!.drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], "selfie.jpg", { type: "image/jpeg" });
+      setNewSelfie(file);
+      closeSelfieCamera();
+    }, "image/jpeg", 0.92);
+  }
+
   const deleteMutation = useMutation({
     mutationFn: (photoId: string) =>
       fetch(`${API_URL}/api/v1/photos/${photoId}`, {
@@ -438,30 +472,40 @@ export function ProfileForm({
                   )}
                 </div>
               </div>
-              {/* Selfie row */}
+              {/* Selfie row / camera */}
               <div>
                 <p className="text-sm font-medium mb-2" style={{ color: "var(--ink)" }}>Selfie</p>
-                <div className="flex items-center gap-3">
-                  {(newSelfie || selfie) && (
-                    <img
-                      src={newSelfie ? URL.createObjectURL(newSelfie) : (selfie!.url ?? "")}
-                      alt="selfie"
-                      className="w-14 h-14 object-cover border-2 flex-shrink-0"
-                      style={{
-                        borderRadius: "var(--radius-wobbly-sm)",
-                        borderColor: newSelfie ? "#2d5da1" : "#2d2d2d",
-                      }}
-                    />
-                  )}
-                  <button
-                    onClick={() => selfieInputRef.current?.click()}
-                    className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 border-2 border-[#2d2d2d] transition-all hover:bg-[#fff9c4]"
-                    style={{ borderRadius: "var(--radius-wobbly-sm)", color: "var(--ink)" }}
-                  >
-                    <Upload className="h-3.5 w-3.5" strokeWidth={2.5} />
-                    {selfie || newSelfie ? "Replace selfie" : "Upload selfie"}
-                  </button>
-                </div>
+                {cameraOpen ? (
+                  <div className="relative overflow-hidden border-2 border-[#2d2d2d]" style={{ borderRadius: "var(--radius-wobbly-sm)", background: "#000" }}>
+                    <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-40 object-cover" />
+                    <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-2">
+                      <Button size="sm" onClick={captureSelfie}>Capture</Button>
+                      <Button size="sm" variant="secondary" onClick={closeSelfieCamera}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    {(newSelfie || selfie) && (
+                      <img
+                        src={newSelfie ? URL.createObjectURL(newSelfie) : (selfie!.url ?? "")}
+                        alt="selfie"
+                        className="w-14 h-14 object-cover border-2 flex-shrink-0"
+                        style={{
+                          borderRadius: "var(--radius-wobbly-sm)",
+                          borderColor: newSelfie ? "#2d5da1" : "#2d2d2d",
+                        }}
+                      />
+                    )}
+                    <button
+                      onClick={openSelfieCamera}
+                      className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 border-2 border-[#2d2d2d] transition-all hover:bg-[#fff9c4]"
+                      style={{ borderRadius: "var(--radius-wobbly-sm)", color: "var(--ink)" }}
+                    >
+                      <Camera className="h-3.5 w-3.5" strokeWidth={2.5} />
+                      {selfie || newSelfie ? "Retake" : "Take selfie"}
+                    </button>
+                  </div>
+                )}
               </div>
               {photoError && (
                 <p className="text-sm" style={{ color: "var(--accent)" }}>{photoError}</p>
