@@ -12,9 +12,17 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build-time env vars (Railway injects these at build time via service variables)
 ARG NEXT_PUBLIC_API_URL
+ARG AUTH_SECRET
+ARG AUTH_URL
+ARG AUTH_GOOGLE_ID
+ARG AUTH_GOOGLE_SECRET
+
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV AUTH_SECRET=$AUTH_SECRET
+ENV AUTH_URL=$AUTH_URL
+ENV AUTH_GOOGLE_ID=$AUTH_GOOGLE_ID
+ENV AUTH_GOOGLE_SECRET=$AUTH_GOOGLE_SECRET
 
 RUN npm run build
 
