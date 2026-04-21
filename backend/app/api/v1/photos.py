@@ -30,6 +30,7 @@ def _compress(data: bytes, content_type: str) -> tuple[bytes, str]:
     img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
     return buf.getvalue(), "image/jpeg"
 
+
 router = APIRouter(prefix="/photos", tags=["photos"])
 
 ALLOWED_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
@@ -44,7 +45,9 @@ async def list_photos(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(UserPhoto).where(UserPhoto.user_id == current_user.id).order_by(UserPhoto.uploaded_at)
+        select(UserPhoto)
+        .where(UserPhoto.user_id == current_user.id)
+        .order_by(UserPhoto.uploaded_at)
     )
     photos = result.scalars().all()
     return [
@@ -74,10 +77,14 @@ async def upload_photos(
 
     async def _upload(upload: UploadFile, is_selfie: bool) -> tuple[str, str, bool]:
         if upload.content_type not in ALLOWED_TYPES:
-            raise HTTPException(status_code=422, detail=f"Unsupported file type: {upload.content_type}")
+            raise HTTPException(
+                status_code=422, detail=f"Unsupported file type: {upload.content_type}"
+            )
         data = await upload.read()
         if len(data) > MAX_SIZE_MB * 1024 * 1024:
-            raise HTTPException(status_code=422, detail=f"File too large (max {MAX_SIZE_MB}MB)")
+            raise HTTPException(
+                status_code=422, detail=f"File too large (max {MAX_SIZE_MB}MB)"
+            )
         data, content_type = _compress(data, upload.content_type)
         filename = f"{'selfie' if is_selfie else uuid.uuid4()}.jpg"
         key = f"users/{current_user.id}/{filename}"
@@ -90,23 +97,28 @@ async def upload_photos(
     uploaded.append(await _upload(selfie, is_selfie=True))
 
     # Delete old photos from R2 and DB
-    old_result = await db.execute(select(UserPhoto).where(UserPhoto.user_id == current_user.id))
+    old_result = await db.execute(
+        select(UserPhoto).where(UserPhoto.user_id == current_user.id)
+    )
     for old in old_result.scalars().all():
         if old.r2_key:
             r2_service.delete_photo(old.r2_key)
         await db.delete(old)
 
     for filename, key, is_selfie in uploaded:
-        db.add(UserPhoto(
-            user_id=current_user.id,
-            filename=filename,
-            r2_key=key,
-            is_selfie=is_selfie,
-        ))
+        db.add(
+            UserPhoto(
+                user_id=current_user.id,
+                filename=filename,
+                r2_key=key,
+                is_selfie=is_selfie,
+            )
+        )
 
     await db.commit()
 
     from app.workers.tasks import score_user_photos
+
     score_user_photos.delay(current_user.id)
 
     return {"uploaded": len(uploaded), "status": "scoring"}
@@ -134,7 +146,9 @@ async def delete_photo(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(UserPhoto).where(UserPhoto.id == photo_id, UserPhoto.user_id == current_user.id)
+        select(UserPhoto).where(
+            UserPhoto.id == photo_id, UserPhoto.user_id == current_user.id
+        )
     )
     photo = result.scalar_one_or_none()
     if not photo:
@@ -154,7 +168,9 @@ async def add_photos(
 ):
     """Add gallery photos and/or replace selfie without touching existing photos."""
     existing = await db.execute(
-        select(UserPhoto).where(UserPhoto.user_id == current_user.id, UserPhoto.is_selfie == False)
+        select(UserPhoto).where(
+            UserPhoto.user_id == current_user.id, UserPhoto.is_selfie == False
+        )
     )
     existing_count = len(existing.scalars().all())
     if photos and existing_count + len(photos) > MAX_PHOTOS:
@@ -165,10 +181,14 @@ async def add_photos(
 
     async def _upload(upload: UploadFile, is_selfie: bool) -> tuple[str, str, bool]:
         if upload.content_type not in ALLOWED_TYPES:
-            raise HTTPException(status_code=422, detail=f"Unsupported file type: {upload.content_type}")
+            raise HTTPException(
+                status_code=422, detail=f"Unsupported file type: {upload.content_type}"
+            )
         data = await upload.read()
         if len(data) > MAX_SIZE_MB * 1024 * 1024:
-            raise HTTPException(status_code=422, detail=f"File too large (max {MAX_SIZE_MB}MB)")
+            raise HTTPException(
+                status_code=422, detail=f"File too large (max {MAX_SIZE_MB}MB)"
+            )
         data, content_type = _compress(data, upload.content_type)
         filename = f"{'selfie' if is_selfie else uuid.uuid4()}.jpg"
         key = f"users/{current_user.id}/{filename}"
@@ -178,22 +198,33 @@ async def add_photos(
     if selfie:
         # Replace existing selfie
         old_selfie = await db.execute(
-            select(UserPhoto).where(UserPhoto.user_id == current_user.id, UserPhoto.is_selfie == True)
+            select(UserPhoto).where(
+                UserPhoto.user_id == current_user.id, UserPhoto.is_selfie == True
+            )
         )
         for old in old_selfie.scalars().all():
             if old.r2_key:
                 r2_service.delete_photo(old.r2_key)
             await db.delete(old)
         filename, key, _ = await _upload(selfie, is_selfie=True)
-        db.add(UserPhoto(user_id=current_user.id, filename=filename, r2_key=key, is_selfie=True))
+        db.add(
+            UserPhoto(
+                user_id=current_user.id, filename=filename, r2_key=key, is_selfie=True
+            )
+        )
 
     for photo in photos:
         filename, key, _ = await _upload(photo, is_selfie=False)
-        db.add(UserPhoto(user_id=current_user.id, filename=filename, r2_key=key, is_selfie=False))
+        db.add(
+            UserPhoto(
+                user_id=current_user.id, filename=filename, r2_key=key, is_selfie=False
+            )
+        )
 
     await db.commit()
 
     from app.workers.tasks import score_user_photos
+
     score_user_photos.delay(current_user.id)
 
     return {"added": len(photos) + (1 if selfie else 0), "status": "scoring"}
@@ -218,3 +249,25 @@ async def serve_photo(
 
     url = r2_service.presigned_url(photo.r2_key)
     return RedirectResponse(url=url, status_code=302)
+
+
+@router.get("/user/{user_id}/selfie")
+async def get_user_selfie(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a user's selfie for display to matches. No auth required."""
+    result = await db.execute(
+        select(UserPhoto).where(
+            UserPhoto.user_id == user_id,
+            UserPhoto.is_selfie == True,
+        )
+    )
+    photo = result.scalar_one_or_none()
+    if not photo or not photo.r2_key:
+        return {"has_photo": False}
+
+    return {
+        "has_photo": True,
+        "url": r2_service.presigned_url(photo.r2_key),
+    }

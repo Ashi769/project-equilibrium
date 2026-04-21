@@ -20,16 +20,26 @@ class VerdictChoice(str, enum.Enum):
 
 class Meeting(Base):
     __tablename__ = "meetings"
-    __table_args__ = (UniqueConstraint("proposer_id", "match_id", name="uq_meeting_pair"),)
+    __table_args__ = (
+        UniqueConstraint("proposer_id", "match_id", name="uq_meeting_pair"),
+    )
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    proposer_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    match_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    proposer_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    match_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
 
     slot_1: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     slot_2: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     slot_3: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    locked_slot: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_slot: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     status: Mapped[MeetingStatus] = mapped_column(
         SAEnum(MeetingStatus, name="meeting_status_enum"),
@@ -41,8 +51,14 @@ class Meeting(Base):
         SAEnum(VerdictChoice, name="verdict_choice_enum"), nullable=True
     )
     match_verdict: Mapped[VerdictChoice | None] = mapped_column(
-        SAEnum(VerdictChoice, name="verdict_choice_enum", create_constraint=False), nullable=True
+        SAEnum(VerdictChoice, name="verdict_choice_enum", create_constraint=False),
+        nullable=True,
     )
+
+    proposer_notified_commit: Mapped[bool] = mapped_column(
+        default=False, nullable=False
+    )
+    match_notified_commit: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

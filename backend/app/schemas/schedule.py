@@ -37,5 +37,6 @@ class MeetingResponse(BaseModel):
     match_verdict: VerdictChoice | None
     created_at: datetime
     is_mutual_match: bool = False
+    partner_committed: bool = False
 
     model_config = {"from_attributes": True}

@@ -19,6 +19,7 @@ router = APIRouter(prefix="/schedule", tags=["schedule"])
 
 def _meeting_to_response(
     meeting: Meeting,
+    current_user_id: str,
     proposer_name: str | None = None,
     match_name: str | None = None,
     proposer_email: str | None = None,
@@ -28,6 +29,11 @@ def _meeting_to_response(
         meeting.proposer_verdict == VerdictChoice.commit
         and meeting.match_verdict == VerdictChoice.commit
     )
+    partner_committed = False
+    if current_user_id == meeting.proposer_id:
+        partner_committed = meeting.match_verdict == VerdictChoice.commit
+    elif current_user_id == meeting.match_id:
+        partner_committed = meeting.proposer_verdict == VerdictChoice.commit
     return MeetingResponse(
         id=meeting.id,
         proposer_id=meeting.proposer_id,
@@ -45,6 +51,7 @@ def _meeting_to_response(
         match_verdict=meeting.match_verdict,
         created_at=meeting.created_at,
         is_mutual_match=is_mutual,
+        partner_committed=partner_committed,
     )
 
 
@@ -52,7 +59,13 @@ async def _fetch_meeting_with_users(meeting_id: str, db: AsyncSession):
     ProposerUser = aliased(User)
     MatchUser = aliased(User)
     result = await db.execute(
-        select(Meeting, ProposerUser.name, MatchUser.name, ProposerUser.email, MatchUser.email)
+        select(
+            Meeting,
+            ProposerUser.name,
+            MatchUser.name,
+            ProposerUser.email,
+            MatchUser.email,
+        )
         .join(ProposerUser, ProposerUser.id == Meeting.proposer_id)
         .join(MatchUser, MatchUser.id == Meeting.match_id)
         .where(Meeting.id == meeting_id)
@@ -75,14 +88,18 @@ async def propose_meeting(
     result = await db.execute(
         select(Meeting).where(
             or_(
-                (Meeting.proposer_id == current_user.id) & (Meeting.match_id == body.match_id),
-                (Meeting.proposer_id == body.match_id) & (Meeting.match_id == current_user.id),
+                (Meeting.proposer_id == current_user.id)
+                & (Meeting.match_id == body.match_id),
+                (Meeting.proposer_id == body.match_id)
+                & (Meeting.match_id == current_user.id),
             ),
             Meeting.status.in_([MeetingStatus.proposed, MeetingStatus.confirmed]),
         )
     )
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Active meeting already exists with this match")
+        raise HTTPException(
+            status_code=409, detail="Active meeting already exists with this match"
+        )
 
     meeting = Meeting(
         proposer_id=current_user.id,
@@ -97,7 +114,9 @@ async def propose_meeting(
 
     match_user = await db.get(User, body.match_id)
     return _meeting_to_response(
-        meeting, current_user.name,
+        meeting,
+        current_user.id,
+        current_user.name,
         match_user.name if match_user else None,
         current_user.email,
         match_user.email if match_user else None,
@@ -129,7 +148,9 @@ async def lock_slot(
     meeting.status = MeetingStatus.confirmed
     await db.commit()
     await db.refresh(meeting)
-    return _meeting_to_response(meeting, proposer_name, match_name, proposer_email, match_email)
+    return _meeting_to_response(
+        meeting, current_user.id, proposer_name, match_name, proposer_email, match_email
+    )
 
 
 @router.post("/verdict", response_model=MeetingResponse)
@@ -155,7 +176,9 @@ async def submit_verdict(
 
     await db.commit()
     await db.refresh(meeting)
-    return _meeting_to_response(meeting, proposer_name, match_name, proposer_email, match_email)
+    return _meeting_to_response(
+        meeting, current_user.id, proposer_name, match_name, proposer_email, match_email
+    )
 
 
 @router.get("", response_model=list[MeetingResponse])
@@ -166,7 +189,13 @@ async def list_meetings(
     ProposerUser = aliased(User)
     MatchUser = aliased(User)
     result = await db.execute(
-        select(Meeting, ProposerUser.name, MatchUser.name, ProposerUser.email, MatchUser.email)
+        select(
+            Meeting,
+            ProposerUser.name,
+            MatchUser.name,
+            ProposerUser.email,
+            MatchUser.email,
+        )
         .join(ProposerUser, ProposerUser.id == Meeting.proposer_id)
         .join(MatchUser, MatchUser.id == Meeting.match_id)
         .where(
@@ -178,7 +207,10 @@ async def list_meetings(
         .order_by(Meeting.created_at.desc())
     )
     rows = result.all()
-    return [_meeting_to_response(m, pn, mn, pe, me) for m, pn, mn, pe, me in rows]
+    return [
+        _meeting_to_response(m, current_user.id, pn, mn, pe, me)
+        for m, pn, mn, pe, me in rows
+    ]
 
 
 @router.get("/{meeting_id}", response_model=MeetingResponse)
@@ -194,4 +226,6 @@ async def get_meeting(
 
     if current_user.id not in (meeting.proposer_id, meeting.match_id):
         raise HTTPException(status_code=403, detail="Not a participant")
-    return _meeting_to_response(meeting, proposer_name, match_name, proposer_email, match_email)
+    return _meeting_to_response(
+        meeting, current_user.id, proposer_name, match_name, proposer_email, match_email
+    )
