@@ -2,6 +2,7 @@
 Celery task: process an interview transcript after it's completed.
 Pipeline: decrypt → anonymize → Gemini analysis → embed → store vectors
 """
+
 import asyncio
 from datetime import datetime, timezone
 
@@ -26,7 +27,7 @@ async def _score_photos(user_id: str):
     from app.services.smv_service import score_photos
     from app.services.r2_service import download_photo
 
-    engine = create_async_engine(settings.database_url, echo=False)
+    engine = create_async_engine(settings.async_database_url, echo=False)
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
     async with Session() as db:
@@ -74,6 +75,7 @@ def process_interview_transcript(self, session_id: str):
 async def _run_pipeline(session_id: str):
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     from sqlalchemy import select
+
     # UserPhoto must be imported before any model that relates to User,
     # otherwise SQLAlchemy mapper config fails resolving the relationship.
     from app.models.photo import UserPhoto  # noqa: F401
@@ -84,7 +86,7 @@ async def _run_pipeline(session_id: str):
     from app.services.analysis_service import analyze_transcript
     from app.services.embedding_service import embed_batch
 
-    engine = create_async_engine(settings.database_url, echo=False)
+    engine = create_async_engine(settings.async_database_url, echo=False)
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
     async with Session() as db:
@@ -99,7 +101,9 @@ async def _run_pipeline(session_id: str):
         # Mark processing
         session.processing_status = ProcessingStatus.processing
         profile_result = await db.execute(
-            select(PsychometricProfile).where(PsychometricProfile.user_id == session.user_id)
+            select(PsychometricProfile).where(
+                PsychometricProfile.user_id == session.user_id
+            )
         )
         profile = profile_result.scalar_one_or_none()
         if profile:
@@ -160,7 +164,9 @@ async def _run_pipeline(session_id: str):
             if profile:
                 has_previous_data = profile.identity_vector is not None
                 profile.analysis_status = (
-                    AnalysisStatus.complete if has_previous_data else AnalysisStatus.failed
+                    AnalysisStatus.complete
+                    if has_previous_data
+                    else AnalysisStatus.failed
                 )
             await db.commit()
             raise exc
