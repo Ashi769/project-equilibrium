@@ -4,7 +4,8 @@ import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-console.log("[DEBUG] API_URL:", API_URL);
+const AUTH_URL = process.env.AUTH_URL;
+console.log("[DEBUG] API_URL:", API_URL, "AUTH_URL:", AUTH_URL);
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -43,6 +44,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     Google({
       clientId: process.env.AUTH_GOOGLE_ID!,
       clientSecret: process.env.AUTH_GOOGLE_SECRET!,
+      authorization: {
+        params: { prompt: "consent", access_type: "offline", response_type: "code" },
+      },
     }),
     Credentials({
       credentials: {
@@ -69,6 +73,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async jwt({ token, user, account }) {
       console.log("[DEBUG] jwt callback:", { user: !!user, account: !!account, provider: account?.provider, idToken: !!account?.id_token });
+      if (account) {
+        console.log("[DEBUG] account details:", { provider: account.provider, idToken: !!account.id_token, accessToken: !!account.access_token });
+      }
 
       // Initial sign-in with credentials
       if (user && (user as any).accessToken) {
