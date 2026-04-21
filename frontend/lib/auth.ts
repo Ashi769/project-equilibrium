@@ -3,6 +3,8 @@ import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
