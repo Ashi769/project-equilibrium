@@ -28,7 +28,6 @@ class User(Base):
     drinking: Mapped[str | None] = mapped_column(String(20), nullable=True)
     smoking: Mapped[str | None] = mapped_column(String(20), nullable=True)
     religion: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    language: Mapped[str | None] = mapped_column(String(50), nullable=True)
     food_preference: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     hard_filters: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)

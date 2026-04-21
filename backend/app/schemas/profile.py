@@ -10,7 +10,6 @@ class HardFilters(BaseModel):
     seeking_drinking: str | None = None
     seeking_smoking: str | None = None
     seeking_religion: str | None = None
-    seeking_language: str | None = None
     seeking_food: str | None = None
 
 
@@ -19,7 +18,6 @@ class UserAttributes(BaseModel):
     drinking: str | None = None
     smoking: str | None = None
     religion: str | None = None
-    language: str | None = None
     food_preference: str | None = None
 
 
@@ -33,7 +31,6 @@ class ProfileResponse(BaseModel):
     drinking: str | None = None
     smoking: str | None = None
     religion: str | None = None
-    language: str | None = None
     food_preference: str | None = None
     analysis_status: AnalysisStatus | None
     hard_filters: dict

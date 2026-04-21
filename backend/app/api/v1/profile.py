@@ -32,7 +32,6 @@ def _build_profile_response(
         drinking=user.drinking,
         smoking=user.smoking,
         religion=user.religion,
-        language=user.language,
         food_preference=user.food_preference,
         analysis_status=profile.analysis_status if profile else None,
         hard_filters=user.hard_filters or {},

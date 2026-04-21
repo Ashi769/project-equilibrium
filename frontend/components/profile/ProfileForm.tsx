@@ -21,20 +21,18 @@ interface UserProfile {
   drinking: string | null;
   smoking: string | null;
   religion: string | null;
-  language: string | null;
   food_preference: string | null;
   analysis_status: "pending" | "processing" | "complete" | null;
   hard_filters: { 
     wants_children?: boolean | null; max_age_diff?: number; seeking_gender?: string[];
     seeking_drinking?: string; seeking_smoking?: string;
-    seeking_religion?: string; seeking_language?: string; seeking_food?: string;
+    seeking_religion?: string; seeking_food?: string;
   };
   reinterview_due?: boolean;
   reinterview_due_at?: string | null;
 }
 
 const RELIGIONS = ["Hindu", "Muslim", "Christian", "Sikh", "Buddhist", "Jain", "Atheist", "Other"];
-const LANGUAGES = ["Hindi", "English", "Telugu", "Tamil", "Marathi", "Bengali", "Gujarati", "Kannada", "Malayalam", "Punjabi", "Other"];
 const LIFESTYLE_OPTS = ["never", "sometimes", "often", "doesn't matter"];
 const FOOD_OPTS = ["veg", "non-veg", "vegan", "egg", "doesn't matter"];
 
@@ -45,7 +43,6 @@ const hardFiltersSchema = z.object({
   seeking_drinking: z.string(),
   seeking_smoking: z.string(),
   seeking_religion: z.string(),
-  seeking_language: z.string(),
   seeking_food: z.string(),
 });
 type HardFiltersForm = z.infer<typeof hardFiltersSchema>;
@@ -150,7 +147,7 @@ export function ProfileForm({
     defaultValues: { 
       wants_children: "open", max_age_diff: 10, seeking_gender: "any",
       seeking_drinking: "doesn't matter", seeking_smoking: "doesn't matter",
-      seeking_religion: "doesn't matter", seeking_language: "doesn't matter", seeking_food: "doesn't matter",
+      seeking_religion: "doesn't matter", seeking_food: "doesn't matter",
     },
   });
 
@@ -230,19 +227,11 @@ export function ProfileForm({
                 placeholder="165" 
                 className="w-full"
                 defaultValue={profile.height ?? undefined}
-                onBlur={(e) => {
-                  const val = parseInt(e.target.value) || undefined;
-                  if (val) updateAttrMutation.mutate({ height: val });
-                }}
               />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Drinking</label>
-              <select 
-                style={wobblySelect} 
-                defaultValue={profile.drinking ?? ""}
-                onChange={(e) => updateAttrMutation.mutate({ drinking: e.target.value || undefined })}
-              >
+              <select style={wobblySelect} defaultValue={profile.drinking ?? ""}>
                 <option value="">Select</option>
                 <option value="never">Never</option>
                 <option value="sometimes">Sometimes</option>
@@ -251,11 +240,7 @@ export function ProfileForm({
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Smoking</label>
-              <select 
-                style={wobblySelect} 
-                defaultValue={profile.smoking ?? ""}
-                onChange={(e) => updateAttrMutation.mutate({ smoking: e.target.value || undefined })}
-              >
+              <select style={wobblySelect} defaultValue={profile.smoking ?? ""}>
                 <option value="">Select</option>
                 <option value="never">Never</option>
                 <option value="sometimes">Sometimes</option>
@@ -264,33 +249,14 @@ export function ProfileForm({
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Religion</label>
-              <select 
-                style={wobblySelect} 
-                defaultValue={profile.religion ?? ""}
-                onChange={(e) => updateAttrMutation.mutate({ religion: e.target.value || undefined })}
-              >
+              <select style={wobblySelect} defaultValue={profile.religion ?? ""}>
                 <option value="">Select</option>
                 {RELIGIONS.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Language</label>
-              <select 
-                style={wobblySelect} 
-                defaultValue={profile.language ?? ""}
-                onChange={(e) => updateAttrMutation.mutate({ language: e.target.value || undefined })}
-              >
-                <option value="">Select</option>
-                {LANGUAGES.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1.5">
               <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Food preference</label>
-              <select 
-                style={wobblySelect} 
-                defaultValue={profile.food_preference ?? ""}
-                onChange={(e) => updateAttrMutation.mutate({ food_preference: e.target.value || undefined })}
-              >
+              <select style={wobblySelect} defaultValue={profile.food_preference ?? ""}>
                 <option value="">Select</option>
                 <option value="veg">Vegetarian</option>
                 <option value="non-veg">Non-vegetarian</option>
@@ -299,6 +265,22 @@ export function ProfileForm({
               </select>
             </div>
           </div>
+          <Button 
+            onClick={() => {
+              const h = parseInt((document.querySelector('[placeholder="165"]') as HTMLInputElement)?.value) || undefined;
+              const d = (document.querySelector('select:nth-of-type(4)') as HTMLSelectElement)?.value || undefined;
+              const s = (document.querySelector('select:nth-of-type(5)') as HTMLSelectElement)?.value || undefined;
+              const r = (document.querySelector('select:nth-of-type(6)') as HTMLSelectElement)?.value || undefined;
+              const f = (document.querySelector('select:nth-of-type(7)') as HTMLSelectElement)?.value || undefined;
+              updateAttrMutation.mutate({ 
+                height: h, drinking: d, smoking: s, religion: r, food_preference: f 
+              });
+            }}
+            size="sm"
+            disabled={updateAttrMutation.isPending}
+          >
+            {updateAttrMutation.isPending ? "Saving…" : "Save About You"}
+          </Button>
         </div>
       </div>
 
@@ -484,7 +466,6 @@ export function ProfileForm({
                 seeking_drinking: data.seeking_drinking === "doesn't matter" ? undefined : data.seeking_drinking,
                 seeking_smoking: data.seeking_smoking === "doesn't matter" ? undefined : data.seeking_smoking,
                 seeking_religion: data.seeking_religion === "doesn't matter" ? undefined : data.seeking_religion,
-                seeking_language: data.seeking_language === "doesn't matter" ? undefined : data.seeking_language,
                 seeking_food: data.seeking_food === "doesn't matter" ? undefined : data.seeking_food,
               })
             )}
@@ -534,13 +515,6 @@ export function ProfileForm({
                 <select style={wobblySelect} {...register("seeking_religion")}>
                   <option value="doesn't matter">Doesn't matter</option>
                   {RELIGIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Language</label>
-                <select style={wobblySelect} {...register("seeking_language")}>
-                  <option value="doesn't matter">Doesn't matter</option>
-                  {LANGUAGES.map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
               <div className="space-y-1.5">

@@ -89,11 +89,6 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
     if seeking_religion and seeking_religion != "doesn't matter":
         conditions.append(User.religion == seeking_religion)
 
-    # Language filter
-    seeking_language = hard_filters.get("seeking_language")
-    if seeking_language and seeking_language != "doesn't matter":
-        conditions.append(User.language == seeking_language)
-
     # Food preference filter
     seeking_food = hard_filters.get("seeking_food")
     if seeking_food and seeking_food != "doesn't matter":
