@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { signIn } from "next-auth/react";
+import { useState, useEffect } from "react";
+import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -17,10 +17,21 @@ const schema = z.object({
 type F = z.infer<typeof schema>;
 
 export default function LoginPage() {
+  const { status } = useSession();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { register, handleSubmit, formState: { errors } } = useForm<F>({ resolver: zodResolver(schema) });
+
+  useEffect(() => {
+    if (status === "authenticated") {
+      router.replace("/selection");
+    }
+  }, [status, router]);
+
+  if (status === "loading") {
+    return null;
+  }
 
   async function onSubmit(data: F) {
     setLoading(true); setError(null);

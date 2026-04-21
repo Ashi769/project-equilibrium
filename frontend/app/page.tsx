@@ -1,7 +1,25 @@
+"use client";
+
 import Link from "next/link";
+import { useSession } from "next-auth/react";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
 export default function Home() {
+  const { status } = useSession();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (status === "authenticated") {
+      router.replace("/selection");
+    }
+  }, [status, router]);
+
+  if (status === "loading") {
+    return null;
+  }
+
   return (
     <main className="min-h-screen flex flex-col" style={{ background: "var(--paper)" }}>
       {/* Nav */}
