@@ -5,77 +5,70 @@ Extracts OCEAN scores, attachment style, values profile, and effort score.
 
 import asyncio
 import json
-import re
 from google import genai
 from google.genai import types
 from app.core.config import settings
 
-ANALYSIS_PROMPT = """You are a psychologist analyzing an interview transcript for a matchmaking platform.
-
-Analyze the following anonymized interview transcript and extract personality data.
-
-Return ONLY valid JSON — no markdown, no code blocks, no explanation — with this exact structure:
-{
-  "ocean_scores": {
-    "openness": 0.0,
-    "conscientiousness": 0.0,
-    "extraversion": 0.0,
-    "agreeableness": 0.0,
-    "neuroticism": 0.0
-  },
-  "attachment_style": "secure",
-  "values_profile": {
-    "wants_children": null,
-    "financial_mindset": "balanced",
-    "lifestyle": "balanced",
-    "family_orientation": "medium",
-    "career_ambition": "medium",
-    "core_values": ["value1", "value2", "value3"]
-  },
-  "effort_score": 0.0,
-  "identity_summary": "2-3 sentence plain text summary of who this person IS",
-  "aspiration_summary": "2-3 sentence plain text summary of what this person WANTS in a partner",
-  "communication_style_summary": "2-3 sentence summary of this person's communication style — tone, vocabulary level, directness, humor, emotional expressiveness, and conversational rhythm"
-}
-
-All float values are between 0.0 and 1.0.
-attachment_style must be one of: secure, anxious, avoidant, disorganized
-financial_mindset: saver | spender | balanced
-lifestyle: homebody | adventurer | balanced
-family_orientation / career_ambition: high | medium | low
+ANALYSIS_PROMPT = """Analyze the following anonymized interview transcript and extract personality data as JSON with this exact structure:
+- ocean_scores: {openness, conscientiousness, extraversion, agreeableness, neuroticism} all floats 0.0-1.0
+- attachment_style: one of secure, anxious, avoidant, disorganized
+- values_profile: {wants_children, financial_mindset, lifestyle, family_orientation, career_ambition, core_values}
+- effort_score: float 0.0-1.0
+- identity_summary: 2-3 sentence summary of who this person IS
+- aspiration_summary: 2-3 sentence summary of what this person WANTS in a partner
+- communication_style_summary: 2-3 sentence summary of communication style
 
 TRANSCRIPT:
 {transcript}"""
 
 
-def _extract_json(text: str) -> dict:
-    """Try several strategies to extract JSON from a model response."""
-    text = text.strip()
-
-    # 1. Direct parse
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # 2. Strip markdown code block (handle both ```json and ```)
-    for pattern in [r"```json\s*([\s\S]+?)\s*```", r"```\s*([\s\S]+?)\s*```"]:
-        code_block = re.search(pattern, text)
-        if code_block:
-            try:
-                return json.loads(code_block.group(1).strip())
-            except json.JSONDecodeError:
-                pass
-
-    # 3. Handle incomplete JSON (trailing cutoff) - try to find complete objects
-    brace_match = re.search(r"\{[\s\S]*\}", text)
-    if brace_match:
-        try:
-            return json.loads(brace_match.group())
-        except json.JSONDecodeError:
-            pass
-
-    raise ValueError(f"Could not extract JSON from Gemini response:\n{text[:500]}")
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "ocean_scores": {
+            "type": "object",
+            "properties": {
+                "openness": {"type": "number"},
+                "conscientiousness": {"type": "number"},
+                "extraversion": {"type": "number"},
+                "agreeableness": {"type": "number"},
+                "neuroticism": {"type": "number"},
+            },
+            "required": [
+                "openness",
+                "conscientiousness",
+                "extraversion",
+                "agreeableness",
+                "neuroticism",
+            ],
+        },
+        "attachment_style": {"type": "string"},
+        "values_profile": {
+            "type": "object",
+            "properties": {
+                "wants_children": {"type": ["boolean", "null"]},
+                "financial_mindset": {"type": "string"},
+                "lifestyle": {"type": "string"},
+                "family_orientation": {"type": "string"},
+                "career_ambition": {"type": "string"},
+                "core_values": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "effort_score": {"type": "number"},
+        "identity_summary": {"type": "string"},
+        "aspiration_summary": {"type": "string"},
+        "communication_style_summary": {"type": "string"},
+    },
+    "required": [
+        "ocean_scores",
+        "attachment_style",
+        "values_profile",
+        "effort_score",
+        "identity_summary",
+        "aspiration_summary",
+        "communication_style_summary",
+    ],
+}
 
 
 async def analyze_transcript(transcript: list[dict]) -> dict:
@@ -97,10 +90,12 @@ async def analyze_transcript(transcript: list[dict]) -> dict:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.2,
-                    max_output_tokens=1024,
+                    max_output_tokens=2048,
+                    response_mime_type="application/json",
+                    response_json_schema=RESPONSE_SCHEMA,
                 ),
             )
-            return _extract_json(response.text)
+            return json.loads(response.text)
         except Exception as e:
             last_err = e
             err_str = str(e)
