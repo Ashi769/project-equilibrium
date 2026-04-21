@@ -17,16 +17,36 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 interface UserPhoto { id: string; filename: string; is_selfie: boolean; url?: string | null; }
 interface UserProfile {
   id: string; name: string; email: string; age: number | null; gender: string | null;
+  height: number | null;
+  drinking: string | null;
+  smoking: string | null;
+  religion: string | null;
+  language: string | null;
+  food_preference: string | null;
   analysis_status: "pending" | "processing" | "complete" | null;
-  hard_filters: { wants_children?: boolean | null; max_age_diff?: number; seeking_gender?: string[]; };
+  hard_filters: { 
+    wants_children?: boolean | null; max_age_diff?: number; seeking_gender?: string[];
+    seeking_drinking?: string; seeking_smoking?: string;
+    seeking_religion?: string; seeking_language?: string; seeking_food?: string;
+  };
   reinterview_due?: boolean;
   reinterview_due_at?: string | null;
 }
+
+const RELIGIONS = ["Hindu", "Muslim", "Christian", "Sikh", "Buddhist", "Jain", "Atheist", "Other"];
+const LANGUAGES = ["Hindi", "English", "Telugu", "Tamil", "Marathi", "Bengali", "Gujarati", "Kannada", "Malayalam", "Punjabi", "Other"];
+const LIFESTYLE_OPTS = ["never", "sometimes", "often", "doesn't matter"];
+const FOOD_OPTS = ["veg", "non-veg", "vegan", "egg", "doesn't matter"];
 
 const hardFiltersSchema = z.object({
   wants_children: z.enum(["yes", "no", "open"]),
   max_age_diff:   z.number().int().min(1).max(30),
   seeking_gender: z.string(),
+  seeking_drinking: z.string(),
+  seeking_smoking: z.string(),
+  seeking_religion: z.string(),
+  seeking_language: z.string(),
+  seeking_food: z.string(),
 });
 type HardFiltersForm = z.infer<typeof hardFiltersSchema>;
 
@@ -69,6 +89,12 @@ export function ProfileForm({
   const updateMutation = useMutation({
     mutationFn: (data: Partial<UserProfile["hard_filters"]>) =>
       api.patch("/api/v1/profile", { hard_filters: data }, accessToken),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["profile"] }),
+  });
+
+  const updateAttrMutation = useMutation({
+    mutationFn: (data: { height?: number; drinking?: string; smoking?: string; religion?: string; language?: string; food_preference?: string }) =>
+      api.patch("/api/v1/profile", { attributes: data }, accessToken),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["profile"] }),
   });
 
@@ -121,7 +147,11 @@ export function ProfileForm({
 
   const { register, handleSubmit } = useForm<HardFiltersForm>({
     resolver: zodResolver(hardFiltersSchema),
-    defaultValues: { wants_children: "open", max_age_diff: 10, seeking_gender: "any" },
+    defaultValues: { 
+      wants_children: "open", max_age_diff: 10, seeking_gender: "any",
+      seeking_drinking: "doesn't matter", seeking_smoking: "doesn't matter",
+      seeking_religion: "doesn't matter", seeking_language: "doesn't matter", seeking_food: "doesn't matter",
+    },
   });
 
   const initials = profile.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
@@ -179,6 +209,95 @@ export function ProfileForm({
           >
             <StatusIcon className="h-3.5 w-3.5" strokeWidth={2.5} />
             {st.label}
+          </div>
+        </div>
+      </div>
+
+      {/* Lifestyle card */}
+      <div
+        className="bg-white border-2 border-[#2d2d2d] overflow-hidden"
+        style={{ borderRadius: "var(--radius-wobbly-alt)", boxShadow: "var(--shadow-hard)" }}
+      >
+        <div className="px-6 py-4 border-b-2 border-dashed border-[#e5e0d8]">
+          <span className="font-heading text-lg font-bold" style={{ color: "var(--ink)" }}>About You</span>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Height (cm)</label>
+              <Input 
+                type="number" 
+                placeholder="165" 
+                className="w-full"
+                defaultValue={profile.height ?? undefined}
+                onBlur={(e) => {
+                  const val = parseInt(e.target.value) || undefined;
+                  if (val) updateAttrMutation.mutate({ height: val });
+                }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Drinking</label>
+              <select 
+                style={wobblySelect} 
+                defaultValue={profile.drinking ?? ""}
+                onChange={(e) => updateAttrMutation.mutate({ drinking: e.target.value || undefined })}
+              >
+                <option value="">Select</option>
+                <option value="never">Never</option>
+                <option value="sometimes">Sometimes</option>
+                <option value="often">Often</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Smoking</label>
+              <select 
+                style={wobblySelect} 
+                defaultValue={profile.smoking ?? ""}
+                onChange={(e) => updateAttrMutation.mutate({ smoking: e.target.value || undefined })}
+              >
+                <option value="">Select</option>
+                <option value="never">Never</option>
+                <option value="sometimes">Sometimes</option>
+                <option value="often">Often</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Religion</label>
+              <select 
+                style={wobblySelect} 
+                defaultValue={profile.religion ?? ""}
+                onChange={(e) => updateAttrMutation.mutate({ religion: e.target.value || undefined })}
+              >
+                <option value="">Select</option>
+                {RELIGIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Language</label>
+              <select 
+                style={wobblySelect} 
+                defaultValue={profile.language ?? ""}
+                onChange={(e) => updateAttrMutation.mutate({ language: e.target.value || undefined })}
+              >
+                <option value="">Select</option>
+                {LANGUAGES.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Food preference</label>
+              <select 
+                style={wobblySelect} 
+                defaultValue={profile.food_preference ?? ""}
+                onChange={(e) => updateAttrMutation.mutate({ food_preference: e.target.value || undefined })}
+              >
+                <option value="">Select</option>
+                <option value="veg">Vegetarian</option>
+                <option value="non-veg">Non-vegetarian</option>
+                <option value="vegan">Vegan</option>
+                <option value="egg">Egg</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -362,6 +481,11 @@ export function ProfileForm({
                 wants_children: data.wants_children === "yes" ? true : data.wants_children === "no" ? false : null,
                 max_age_diff:   data.max_age_diff,
                 seeking_gender: data.seeking_gender === "any" ? [] : [data.seeking_gender],
+                seeking_drinking: data.seeking_drinking === "doesn't matter" ? undefined : data.seeking_drinking,
+                seeking_smoking: data.seeking_smoking === "doesn't matter" ? undefined : data.seeking_smoking,
+                seeking_religion: data.seeking_religion === "doesn't matter" ? undefined : data.seeking_religion,
+                seeking_language: data.seeking_language === "doesn't matter" ? undefined : data.seeking_language,
+                seeking_food: data.seeking_food === "doesn't matter" ? undefined : data.seeking_food,
               })
             )}
             className="space-y-4"
@@ -390,6 +514,40 @@ export function ProfileForm({
               <div className="flex items-center gap-3">
                 <Input type="number" className="w-24" {...register("max_age_diff", { valueAsNumber: true })} />
                 <span className="text-base" style={{ color: "var(--muted)" }}>years</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Drinking</label>
+                <select style={wobblySelect} {...register("seeking_drinking")}>
+                  {LIFESTYLE_OPTS.map(o => <option key={o} value={o}>{o === "doesn't matter" ? "Doesn't matter" : o}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Smoking</label>
+                <select style={wobblySelect} {...register("seeking_smoking")}>
+                  {LIFESTYLE_OPTS.map(o => <option key={o} value={o}>{o === "doesn't matter" ? "Doesn't matter" : o}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Religion</label>
+                <select style={wobblySelect} {...register("seeking_religion")}>
+                  <option value="doesn't matter">Doesn't matter</option>
+                  {RELIGIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Language</label>
+                <select style={wobblySelect} {...register("seeking_language")}>
+                  <option value="doesn't matter">Doesn't matter</option>
+                  {LANGUAGES.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Food preference</label>
+                <select style={wobblySelect} {...register("seeking_food")}>
+                  {FOOD_OPTS.map(o => <option key={o} value={o}>{o === "doesn't matter" ? "Doesn't matter" : o}</option>)}
+                </select>
               </div>
             </div>
             <Button type="submit" size="sm" disabled={updateMutation.isPending}>

@@ -13,7 +13,9 @@ from app.schemas.profile import ProfileResponse, ProfileUpdateRequest
 router = APIRouter(prefix="/profile", tags=["profile"])
 
 
-def _build_profile_response(user: User, profile: PsychometricProfile | None) -> ProfileResponse:
+def _build_profile_response(
+    user: User, profile: PsychometricProfile | None
+) -> ProfileResponse:
     reinterview_due = False
     reinterview_due_at = None
     if profile and profile.reinterview_due_at:
@@ -26,6 +28,12 @@ def _build_profile_response(user: User, profile: PsychometricProfile | None) -> 
         email=user.email,
         age=user.age,
         gender=user.gender,
+        height=user.height,
+        drinking=user.drinking,
+        smoking=user.smoking,
+        religion=user.religion,
+        language=user.language,
+        food_preference=user.food_preference,
         analysis_status=profile.analysis_status if profile else None,
         hard_filters=user.hard_filters or {},
         reinterview_due=reinterview_due,
@@ -39,7 +47,9 @@ async def get_profile(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(PsychometricProfile).where(PsychometricProfile.user_id == current_user.id)
+        select(PsychometricProfile).where(
+            PsychometricProfile.user_id == current_user.id
+        )
     )
     profile = result.scalar_one_or_none()
     return _build_profile_response(current_user, profile)
@@ -54,10 +64,18 @@ async def update_profile(
     if body.hard_filters is not None:
         current_user.hard_filters = body.hard_filters.model_dump(exclude_none=False)
 
+    if body.attributes is not None:
+        attrs = body.attributes.model_dump(exclude_none=True)
+        for key, value in attrs.items():
+            setattr(current_user, key, value)
+
     result = await db.execute(
-        select(PsychometricProfile).where(PsychometricProfile.user_id == current_user.id)
+        select(PsychometricProfile).where(
+            PsychometricProfile.user_id == current_user.id
+        )
     )
     profile = result.scalar_one_or_none()
+    await db.commit()
     return _build_profile_response(current_user, profile)
 
 
@@ -67,13 +85,18 @@ async def analysis_status(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(PsychometricProfile).where(PsychometricProfile.user_id == current_user.id)
+        select(PsychometricProfile).where(
+            PsychometricProfile.user_id == current_user.id
+        )
     )
     profile = result.scalar_one_or_none()
     if not profile:
         return {"analysis_status": "pending"}
 
-    if profile.analysis_status == AnalysisStatus.failed and profile.identity_vector is not None:
+    if (
+        profile.analysis_status == AnalysisStatus.failed
+        and profile.identity_vector is not None
+    ):
         profile.analysis_status = AnalysisStatus.complete
         await db.commit()
 
