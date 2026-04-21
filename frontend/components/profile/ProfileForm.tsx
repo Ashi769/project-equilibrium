@@ -361,14 +361,11 @@ export function ProfileForm({
             </div>
           ) : (
             <button
-              className="flex items-center gap-1.5 text-sm font-medium transition-colors"
-              style={{ color: "var(--muted)" }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = "#2d5da1")}
-              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--muted)")}
               onClick={() => setEditingPhotos(true)}
+              className="text-sm font-medium"
+              style={{ color: "var(--secondary)" }}
             >
-              <Camera className="h-3.5 w-3.5" strokeWidth={2.5} />
-              Update
+              Edit
             </button>
           )}
         </div>
