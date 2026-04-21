@@ -30,28 +30,10 @@ export default function Home() {
             Equilibrium
           </span>
         </div>
-        <div className="flex items-center gap-3">
-          <Link href="/login">
-            <Button variant="ghost" size="sm">Sign in</Button>
-          </Link>
-          <Link href="/register">
-            <Button size="sm">Apply</Button>
-          </Link>
-        </div>
       </header>
 
       {/* Hero */}
       <section className="flex-1 flex flex-col items-center justify-center px-6 py-20 text-center relative overflow-hidden">
-        {/* Decorative bouncing circles — desktop only */}
-        <div
-          className="bounce-gentle hidden md:block absolute right-12 top-16 w-14 h-14 border-2 border-dashed border-[#e5e0d8] pointer-events-none"
-          style={{ borderRadius: "50%" }}
-        />
-        <div
-          className="bounce-gentle hidden md:block absolute left-16 bottom-24 w-8 h-8 border-2 border-dashed border-[#e5e0d8] pointer-events-none"
-          style={{ borderRadius: "50%", animationDelay: "1.2s" }}
-        />
-
         <div className="relative max-w-3xl mx-auto space-y-10">
           {/* Post-it tag */}
           <div className="flex justify-center">
@@ -63,7 +45,7 @@ export default function Home() {
                 boxShadow: "var(--shadow-hard-sm)",
               }}
             >
-              ✏️ Psychometric Matching · By Invitation Only
+              ✏️ Psychometric Matching
             </div>
           </div>
 
@@ -107,22 +89,6 @@ export default function Home() {
             <Link href="/login">
               <Button size="lg" variant="secondary">Sign In</Button>
             </Link>
-            {/* Hand-drawn arrow — desktop only */}
-            <svg
-              className="absolute -right-20 -top-6 hidden md:block pointer-events-none"
-              width="64" height="52" viewBox="0 0 64 52" fill="none"
-            >
-              <path
-                d="M6,44 Q18,12 54,18"
-                stroke="#2d2d2d" strokeWidth="2.5" strokeLinecap="round"
-                fill="none" strokeDasharray="5,4"
-              />
-              <path
-                d="M48,10 L56,20 L44,22"
-                stroke="#2d2d2d" strokeWidth="2.5" strokeLinecap="round"
-                strokeLinejoin="round" fill="none"
-              />
-            </svg>
           </div>
 
           {/* Dashed divider */}
