@@ -62,14 +62,7 @@ export default function MeetingsPage() {
   const confirmed   = meetings.filter((m) => m.status === "confirmed");
   const outgoing    = meetings.filter((m) => m.proposer_id === userId && m.status === "proposed");
   const connections = meetings.filter((m) => m.is_mutual_match);
-  const past        = meetings.filter((m) => (m.status === "completed" && !m.is_mutual_match) || m.status === "cancelled");
-  const declined   = meetings.filter((m) => {
-    if (m.status !== "completed") return false;
-    if (m.is_mutual_match) return false;
-    const myVerdict   = m.proposer_id === userId ? m.proposer_verdict : m.match_verdict;
-    const theirVerdict = m.proposer_id === userId ? m.match_verdict : m.proposer_verdict;
-    return myVerdict === "commit" && theirVerdict === "pool";
-  });
+  const past        = meetings.filter((m) => m.status === "completed" || m.status === "cancelled");
 
   if (meetings.length === 0) {
     return (
@@ -123,12 +116,6 @@ export default function MeetingsPage() {
       {past.length > 0 && (
         <Section title="Past" count={past.length}>
           {past.map((m) => <PastCard key={m.id} meeting={m} userId={userId!} />)}
-        </Section>
-      )}
-
-      {declined.length > 0 && (
-        <Section title="They Returned to Pool" count={declined.length}>
-          {declined.map((m) => <DeclinedCard key={m.id} meeting={m} userId={userId!} />)}
         </Section>
       )}
     </div>
@@ -349,7 +336,9 @@ function ConnectionCard({ meeting, userId }: { meeting: MeetingResponse; userId:
 
 function PastCard({ meeting, userId }: { meeting: MeetingResponse; userId: string }) {
   const otherName = meeting.proposer_id === userId ? meeting.match_name : meeting.proposer_name;
-  const myVerdict = meeting.proposer_id === userId ? meeting.proposer_verdict : meeting.match_verdict;
+  const myVerdict   = meeting.proposer_id === userId ? meeting.proposer_verdict : meeting.match_verdict;
+  const theirVerdict = meeting.proposer_id === userId ? meeting.match_verdict : meeting.proposer_verdict;
+  const verdictLabel = meeting.is_mutual_match ? "Verdict: Committed ✓" : "Verdict: Didn't work out";
   return (
     <div
       className="p-5 flex items-center justify-between border-2 border-[#e5e0d8] bg-white"
@@ -358,7 +347,7 @@ function PastCard({ meeting, userId }: { meeting: MeetingResponse; userId: strin
       <div>
         <p className="font-heading text-lg font-bold" style={{ color: "var(--ink)" }}>{otherName ?? "Match"}</p>
         <p className="text-sm mt-0.5" style={{ color: "var(--muted)" }}>
-          {meeting.status === "completed" ? `Verdict: ${myVerdict ?? "—"}` : "Cancelled"}
+          {verdictLabel}
         </p>
       </div>
       <span
@@ -368,35 +357,5 @@ function PastCard({ meeting, userId }: { meeting: MeetingResponse; userId: strin
         {meeting.status}
       </span>
     </div>
-  );
-}
-
-function DeclinedCard({ meeting, userId }: { meeting: MeetingResponse; userId: string }) {
-  const otherName = meeting.proposer_id === userId ? meeting.match_name : meeting.proposer_name;
-  const theirVerdict = meeting.proposer_id === userId ? meeting.match_verdict : meeting.proposer_verdict;
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="p-5 border-[3px] border-[#ff6b6b] bg-white"
-      style={{ borderRadius: "var(--radius-wobbly-alt)", boxShadow: "4px 4px 0px 0px #ff6b6b" }}
-    >
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="font-heading text-xl font-bold" style={{ color: "var(--ink)" }}>
-            {otherName ?? "Match"}
-          </p>
-          <p className="text-base mt-1" style={{ color: "var(--muted)" }}>
-            They returned to pool after you committed
-          </p>
-        </div>
-        <span
-          className="text-xs font-bold px-2 py-1 border-2 border-[#ff6b6b] text-white"
-          style={{ borderRadius: "var(--radius-wobbly-sm)", background: "#ff6b6b" }}
-        >
-          Returned to Pool
-        </span>
-      </div>
-    </motion.div>
   );
 }
