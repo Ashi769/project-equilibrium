@@ -19,7 +19,6 @@ interface MeetingResponse {
   status: "proposed" | "confirmed" | "completed" | "cancelled";
   proposer_verdict: string | null; match_verdict: string | null;
   created_at: string; is_mutual_match: boolean;
-  partner_committed: boolean;
 }
 
 function formatSlot(iso: string) {
@@ -281,11 +280,7 @@ function OutgoingCard({ meeting }: { meeting: MeetingResponse }) {
           </p>
           <div className="flex items-center gap-2 mt-1">
             <Clock className="h-3.5 w-3.5" style={{ color: "var(--muted)" }} strokeWidth={2.5} />
-            <p className="text-sm" style={{ color: "var(--muted)" }}>
-              {meeting.partner_committed 
-                ? "They committed — awaiting your response" 
-                : "Waiting for them to pick a time"}
-            </p>
+            <p className="text-sm" style={{ color: "var(--muted)" }}>Waiting for them to pick a time</p>
           </div>
         </div>
       </div>
