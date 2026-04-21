@@ -49,6 +49,11 @@ async function getBackendTokens(
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
   secret: process.env.AUTH_SECRET,
+  events: {
+    async signIn({ user, account, profile, isNewUser }) {
+      console.log("[DEBUG] events.signIn:", { hasUser: !!user, hasAccount: !!account, hasProfile: !!profile, isNewUser, provider: account?.provider });
+    },
+  },
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID!,
