@@ -5,7 +5,8 @@ import { z } from "zod";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const AUTH_URL = process.env.AUTH_URL;
-console.log("[DEBUG] API_URL:", API_URL, "AUTH_URL:", AUTH_URL);
+const AUTH_SECRET = process.env.AUTH_SECRET;
+console.log("[DEBUG] API_URL:", API_URL, "AUTH_URL:", AUTH_URL, "AUTH_SECRET:", AUTH_SECRET ? "set" : "NOT SET");
 
 const loginSchema = z.object({
   email: z.string().email(),
