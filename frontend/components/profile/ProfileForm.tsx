@@ -477,7 +477,7 @@ export function ProfileForm({
                 <p className="text-sm font-medium mb-2" style={{ color: "var(--ink)" }}>Selfie</p>
                 {cameraOpen ? (
                   <div className="relative overflow-hidden border-2 border-[#2d2d2d]" style={{ borderRadius: "var(--radius-wobbly-sm)", background: "#000" }}>
-                    <video ref={videoRef} autoPlay playsInline muted className="w-full max-h-40 object-cover" />
+                    <video ref={videoRef} autoPlay playsInline muted className="w-full aspect-[3/4] object-cover" />
                     <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-2">
                       <Button size="sm" onClick={captureSelfie}>Capture</Button>
                       <Button size="sm" variant="secondary" onClick={closeSelfieCamera}>Cancel</Button>
