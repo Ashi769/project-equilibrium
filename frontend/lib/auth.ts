@@ -3,9 +3,6 @@ import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 
-console.log("[DEBUG] AUTH_SECRET:", process.env.AUTH_SECRET ? `set (len:${process.env.AUTH_SECRET.length})` : "NOT SET");
-console.log("[DEBUG] AUTH_URL:", process.env.AUTH_URL);
-
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
