@@ -20,7 +20,6 @@ from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
     GoogleAuthRequest,
-    GoogleSyncRequest,
     TokenResponse,
     UserOut,
     RefreshRequest,
@@ -94,26 +93,38 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/google", response_model=TokenResponse)
 async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db)):
-    logger.info(f"[DEBUG] Google auth called, id_token present: {bool(body.id_token)}")
-    try:
-        idinfo = google_id_token.verify_oauth2_token(
-            body.id_token,
-            google_requests.Request(),
-            settings.google_client_id,
-        )
+    # If google_id provided directly (not via id_token verification)
+    if body.google_id and body.email:
+        google_id = body.google_id
+        email = body.email
+        name = body.name or email.split("@")[0]
         logger.info(
-            f"[DEBUG] Google token verified, sub: {idinfo.get('sub')}, email: {idinfo.get('email')}"
+            f"[DEBUG] Google auth via sync: google_id: {google_id}, email: {email}"
         )
-    except Exception as e:
-        logger.error(f"[DEBUG] Google token verification failed: {e}")
-        raise HTTPException(status_code=401, detail="Invalid Google token")
+    else:
+        # Original flow with id_token verification
+        logger.info(
+            f"[DEBUG] Google auth called, id_token present: {bool(body.id_token)}"
+        )
+        try:
+            idinfo = google_id_token.verify_oauth2_token(
+                body.id_token,
+                google_requests.Request(),
+                settings.google_client_id,
+            )
+            logger.info(
+                f"[DEBUG] Google token verified, sub: {idinfo.get('sub')}, email: {idinfo.get('email')}"
+            )
+        except Exception as e:
+            logger.error(f"[DEBUG] Google token verification failed: {e}")
+            raise HTTPException(status_code=401, detail="Invalid Google token")
 
-    google_id = idinfo["sub"]
-    email = idinfo["email"]
-    name = idinfo.get("name", email.split("@")[0])
-    logger.info(
-        f"[DEBUG] Google auth - google_id: {google_id}, email: {email}, name: {name}"
-    )
+        google_id = idinfo["sub"]
+        email = idinfo["email"]
+        name = idinfo.get("name", email.split("@")[0])
+        logger.info(
+            f"[DEBUG] Google auth - google_id: {google_id}, email: {email}, name: {name}"
+        )
 
     # Find by google_id or email
     result = await db.execute(

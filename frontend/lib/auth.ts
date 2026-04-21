@@ -4,9 +4,6 @@ import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const AUTH_URL = process.env.AUTH_URL;
-const AUTH_SECRET = process.env.AUTH_SECRET;
-console.log("[DEBUG] API_URL:", API_URL, "AUTH_URL:", AUTH_URL, "AUTH_SECRET:", AUTH_SECRET ? "set" : "NOT SET");
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -20,17 +17,15 @@ type BackendTokens = {
 };
 
 async function getBackendTokens(
-  provider: "google" | "credentials" | "refresh" | "sync",
+  provider: "google" | "credentials" | "refresh",
   payload: Record<string, string>,
 ): Promise<BackendTokens | null> {
   const endpoint =
     provider === "google"
       ? "/api/v1/auth/google"
-      : provider === "sync"
-        ? "/api/v1/auth/sync"
-        : provider === "refresh"
-          ? "/api/v1/auth/refresh"
-          : "/api/v1/auth/login";
+      : provider === "refresh"
+        ? "/api/v1/auth/refresh"
+        : "/api/v1/auth/login";
   console.log("[DEBUG] getBackendTokens:", { provider, endpoint, hasPayload: !!Object.keys(payload).length });
   const res = await fetch(`${API_URL}${endpoint}`, {
     method: "POST",
@@ -121,24 +116,24 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         tokenKeys: Object.keys(token),
       });
 
-      // Google OAuth - call sync endpoint to get backend tokens
+      // Google OAuth - call backend /google endpoint to get backend tokens
       // NextAuth v5 doesn't give us account.id_token, but we have sub and email in token
       if (!token.accessToken && token.sub && token.email) {
-        console.log("[DEBUG] jwt: calling sync endpoint with google info");
-        const data = await getBackendTokens("sync", {
+        console.log("[DEBUG] jwt: calling /google endpoint with google info");
+        const data = await getBackendTokens("google", {
           google_id: token.sub,
           email: token.email,
           name: token.name || "",
         });
         if (data) {
-          console.log("[DEBUG] jwt: sync successful, got tokens");
+          console.log("[DEBUG] jwt: got tokens from /google");
           token.accessToken = data.access_token;
           token.refreshToken = data.refresh_token;
           token.userId = data.user.id;
           token.accessTokenExpires = Date.now() + 14 * 60 * 1000;
           return token;
         } else {
-          console.log("[DEBUG] jwt: sync FAILED");
+          console.log("[DEBUG] jwt: /google call FAILED");
         }
       }
 

@@ -15,12 +15,9 @@ class LoginRequest(BaseModel):
 
 
 class GoogleAuthRequest(BaseModel):
-    id_token: str
-
-
-class GoogleSyncRequest(BaseModel):
-    google_id: str
-    email: str
+    id_token: str | None = None
+    google_id: str | None = None
+    email: str | None = None
     name: str | None = None
 
 
