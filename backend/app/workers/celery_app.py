@@ -3,8 +3,8 @@ from app.core.config import settings
 
 celery_app = Celery(
     "equilibrium",
-    broker=settings.celery_broker_url,
-    backend=settings.celery_result_backend,
+    broker=settings.resolved_celery_broker_url,
+    backend=settings.resolved_celery_result_backend,
     include=["app.workers.tasks"],
 )
 

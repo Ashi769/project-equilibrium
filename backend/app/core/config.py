@@ -24,9 +24,26 @@ class Settings(BaseSettings):
         return url
 
     # Redis / Celery
-    redis_url: str = "redis://localhost:6379/0"
-    celery_broker_url: str = "redis://localhost:6379/1"
-    celery_result_backend: str = "redis://localhost:6379/2"
+    redis_url: str = ""
+    celery_broker_url: str = ""
+    celery_result_backend: str = ""
+
+    @property
+    def resolved_redis_url(self) -> str:
+        return self.redis_url or "redis://localhost:6379/0"
+
+    @property
+    def resolved_celery_broker_url(self) -> str:
+        return (
+            self.celery_broker_url or f"{self.resolved_redis_url.rsplit('/', 1)[0]}/1"
+        )
+
+    @property
+    def resolved_celery_result_backend(self) -> str:
+        return (
+            self.celery_result_backend
+            or f"{self.resolved_redis_url.rsplit('/', 1)[0]}/2"
+        )
 
     # JWT
     secret_key: str = "change_me_in_production"
