@@ -173,34 +173,3 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
 
     logger.info(f"[DEBUG] Refresh successful for user: {user.id}")
     return _token_response(user)
-
-
-@router.post("/sync", response_model=TokenResponse)
-async def sync_google_user(body: GoogleSyncRequest, db: AsyncSession = Depends(get_db)):
-    logger.info(
-        f"[DEBUG] Sync called for google_id: {body.google_id}, email: {body.email}"
-    )
-
-    result = await db.execute(
-        select(User).where(
-            (User.google_id == body.google_id) | (User.email == body.email)
-        )
-    )
-    user = result.scalar_one_or_none()
-
-    if user:
-        if not user.google_id:
-            user.google_id = body.google_id
-            logger.info(f"[DEBUG] Synced google_id to existing user: {user.id}")
-    else:
-        user = User(
-            email=body.email,
-            google_id=body.google_id,
-            name=body.name or body.email.split("@")[0],
-        )
-        db.add(user)
-        await db.flush()
-        db.add(PsychometricProfile(user_id=user.id))
-        logger.info(f"[DEBUG] Created new user via sync: {user.id}")
-
-    return _token_response(user)
