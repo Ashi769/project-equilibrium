@@ -9,7 +9,9 @@ from google import genai
 from google.genai import types
 from app.core.config import settings
 
-ANALYSIS_PROMPT = """Analyze the following anonymized interview transcript and extract personality data as JSON with this exact structure:
+ANALYSIS_PROMPT = """You are a psychologist analyzing an interview transcript for a matchmaking platform.
+
+Analyze the following anonymized interview transcript and extract personality data as JSON with this exact structure:
 - ocean_scores: {openness, conscientiousness, extraversion, agreeableness, neuroticism} all floats 0.0-1.0
 - attachment_style: one of secure, anxious, avoidant, disorganized
 - values_profile: {wants_children, financial_mindset, lifestyle, family_orientation, career_ambition, core_values}
