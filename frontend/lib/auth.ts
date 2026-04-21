@@ -71,6 +71,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
+    async signIn({ user, account, profile }) {
+      console.log("[DEBUG] signIn callback:", { user: !!user, account: !!account, provider: account?.provider });
+      if (account?.provider === "google" && account.id_token) {
+        const data = await getBackendTokens("google", { id_token: account.id_token });
+        if (data) {
+          console.log("[DEBUG] Google signin successful, storing tokens");
+          (user as any).accessToken = data.access_token;
+          (user as any).refreshToken = data.refresh_token;
+          (user as any).userId = data.user.id;
+        }
+      }
+      return true;
+    },
     async jwt({ token, user, account }) {
       console.log("[DEBUG] jwt callback:", { user: !!user, account: !!account, provider: account?.provider, idToken: !!account?.id_token });
       if (account) {
