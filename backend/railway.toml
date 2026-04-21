@@ -7,3 +7,7 @@ startCommand = "./start.sh"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
+
+[deploy.celery]
+startCommand = "celery -A app.workers.celery_app worker --loglevel=info --concurrency=2"
+healthcheckType = "none"
