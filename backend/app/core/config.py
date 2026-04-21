@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # Encryption
     transcript_encryption_key: str = ""
 
+    # Debug APIs
+    debug_api_token: str = ""
+
     # Interview (set to 2 for fast dev testing, 6 for production)
     interview_min_topics: int = 6
 

@@ -6,7 +6,16 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
-from app.api.v1 import auth, interview, matches, profile, photos, schedule, signal
+from app.api.v1 import (
+    auth,
+    debug,
+    interview,
+    matches,
+    profile,
+    photos,
+    schedule,
+    signal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +53,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(debug.router, prefix="/api/v1")
 app.include_router(interview.router, prefix="/api/v1")
 app.include_router(matches.router, prefix="/api/v1")
 app.include_router(profile.router, prefix="/api/v1")
