@@ -61,6 +61,9 @@ async def signaling(ws: WebSocket, meeting_id: str):
     )
 
     if existing_peers:
+        logger.info(
+            f"signal: notifying {user_id[:8]} about {len(existing_peers)} peers"
+        )
         try:
             await ws.send_json(
                 {
