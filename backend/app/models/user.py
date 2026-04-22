@@ -50,5 +50,6 @@ class User(Base):
     cached_matches: Mapped[list["MatchCache"]] = relationship(
         "MatchCache",
         back_populates="user",
+        foreign_keys="MatchCache.user_id",
         lazy="select",
     )
