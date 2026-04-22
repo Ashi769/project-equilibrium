@@ -94,7 +94,20 @@ setConnected(true);
         const state = pc.iceConnectionState;
         console.log("webrtc: ICE state →", state);
         if (state === "connected" || state === "completed") setConnected(true);
-        if (state === "disconnected" || state === "failed") setConnected(false);
+        if (state === "disconnected") {
+          console.log("webrtc: ICE disconnected, attempting reconnection...");
+          setTimeout(() => {
+            if (pc.iceConnectionState === "disconnected") {
+              pc.restartIce();
+            }
+          }, 2000);
+        }
+        if (state === "failed") {
+          console.log("webrtc: ICE failed, creating new offer...");
+          pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
+            ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
+          });
+        }
       };
 
       // Timeout for peer connection
