@@ -36,11 +36,101 @@ def _meets_bidirectional_filters(user: User, candidate: User) -> bool:
         my_seeking = my_filters.get("seeking_gender", [])
         their_seeking = their_filters.get("seeking_gender", [])
 
-        # I must want their gender
         if my_seeking and their_gender not in my_seeking:
             return False
-        # They must want my gender
         if their_seeking and my_gender not in their_seeking:
+            return False
+
+    # Religion: both must have matching preferences
+    my_religion = user.religion
+    their_religion = candidate.religion
+    my_seeking_religion = my_filters.get("seeking_religion")
+    their_seeking_religion = their_filters.get("seeking_religion")
+
+    if (
+        my_religion
+        and their_religion
+        and my_seeking_religion
+        and my_seeking_religion != "doesn't matter"
+    ):
+        if their_religion != my_seeking_religion:
+            return False
+    if (
+        my_religion
+        and their_religion
+        and their_seeking_religion
+        and their_seeking_religion != "doesn't matter"
+    ):
+        if my_religion != their_seeking_religion:
+            return False
+
+    # Food preference: both must have matching preferences
+    my_food = user.food_preference
+    their_food = candidate.food_preference
+    my_seeking_food = my_filters.get("seeking_food")
+    their_seeking_food = their_filters.get("seeking_food")
+
+    if (
+        my_food
+        and their_food
+        and my_seeking_food
+        and my_seeking_food != "doesn't matter"
+    ):
+        if their_food != my_seeking_food:
+            return False
+    if (
+        my_food
+        and their_food
+        and their_seeking_food
+        and their_seeking_food != "doesn't matter"
+    ):
+        if my_food != their_seeking_food:
+            return False
+
+    # Drinking: both must have matching preferences
+    my_drinking = user.drinking
+    their_drinking = candidate.drinking
+    my_seeking_drinking = my_filters.get("seeking_drinking")
+    their_seeking_drinking = their_filters.get("seeking_drinking")
+
+    if (
+        my_drinking
+        and their_drinking
+        and my_seeking_drinking
+        and my_seeking_drinking != "doesn't matter"
+    ):
+        if their_drinking != my_seeking_drinking:
+            return False
+    if (
+        my_drinking
+        and their_drinking
+        and their_seeking_drinking
+        and their_seeking_drinking != "doesn't matter"
+    ):
+        if my_drinking != their_seeking_drinking:
+            return False
+
+    # Smoking: both must have matching preferences
+    my_smoking = user.smoking
+    their_smoking = candidate.smoking
+    my_seeking_smoking = my_filters.get("seeking_smoking")
+    their_seeking_smoking = their_filters.get("seeking_smoking")
+
+    if (
+        my_smoking
+        and their_smoking
+        and my_seeking_smoking
+        and my_seeking_smoking != "doesn't matter"
+    ):
+        if their_smoking != my_seeking_smoking:
+            return False
+    if (
+        my_smoking
+        and their_smoking
+        and their_seeking_smoking
+        and their_seeking_smoking != "doesn't matter"
+    ):
+        if my_smoking != their_seeking_smoking:
             return False
 
     return True
@@ -93,26 +183,6 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
                 User.hard_filters["wants_children"].is_(None),
             )
         )
-
-    # Drinking filter
-    seeking_drinking = hard_filters.get("seeking_drinking")
-    if seeking_drinking and seeking_drinking != "doesn't matter":
-        conditions.append(User.drinking == seeking_drinking)
-
-    # Smoking filter
-    seeking_smoking = hard_filters.get("seeking_smoking")
-    if seeking_smoking and seeking_smoking != "doesn't matter":
-        conditions.append(User.smoking == seeking_smoking)
-
-    # Religion filter
-    seeking_religion = hard_filters.get("seeking_religion")
-    if seeking_religion and seeking_religion != "doesn't matter":
-        conditions.append(User.religion == seeking_religion)
-
-    # Food preference filter
-    seeking_food = hard_filters.get("seeking_food")
-    if seeking_food and seeking_food != "doesn't matter":
-        conditions.append(User.food_preference == seeking_food)
 
     raw_vec = my_profile.aspiration_vector
     if hasattr(raw_vec, "tolist"):
