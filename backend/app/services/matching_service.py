@@ -23,6 +23,14 @@ WEIGHT_LINGUISTIC = 0.25  # communication style similarity
 WEIGHT_OCEAN = 0.20  # OCEAN dimension similarity
 
 
+FOOD_COMPATIBILITY = {
+    "vegan": ["vegan"],
+    "veg": ["vegan", "veg"],
+    "egg": ["veg", "egg", "non-veg"],
+    "non-veg": ["egg", "non-veg"],
+}
+
+
 def _meets_bidirectional_filters(user: User, candidate: User) -> bool:
     """Check if candidate meets user's preferences AND user meets candidate's preferences."""
     my_filters = user.hard_filters or {}
@@ -64,28 +72,22 @@ def _meets_bidirectional_filters(user: User, candidate: User) -> bool:
         if my_religion != their_seeking_religion:
             return False
 
-    # Food preference: both must have matching preferences
+    # Food preference: compatible diets
     my_food = user.food_preference
     their_food = candidate.food_preference
     my_seeking_food = my_filters.get("seeking_food")
     their_seeking_food = their_filters.get("seeking_food")
 
-    if (
-        my_food
-        and their_food
-        and my_seeking_food
-        and my_seeking_food != "doesn't matter"
-    ):
-        if their_food != my_seeking_food:
-            return False
-    if (
-        my_food
-        and their_food
-        and their_seeking_food
-        and their_seeking_food != "doesn't matter"
-    ):
-        if my_food != their_seeking_food:
-            return False
+    if my_food and their_food:
+        my_compatible = FOOD_COMPATIBILITY.get(my_food, [my_food])
+        their_compatible = FOOD_COMPATIBILITY.get(their_food, [their_food])
+
+        if my_seeking_food and my_seeking_food != "doesn't matter":
+            if their_food not in my_compatible:
+                return False
+        if their_seeking_food and their_seeking_food != "doesn't matter":
+            if my_food not in their_compatible:
+                return False
 
     # Drinking: both must have matching preferences
     my_drinking = user.drinking
