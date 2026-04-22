@@ -23,6 +23,29 @@ WEIGHT_LINGUISTIC = 0.25  # communication style similarity
 WEIGHT_OCEAN = 0.20  # OCEAN dimension similarity
 
 
+def _meets_bidirectional_filters(user: User, candidate: User) -> bool:
+    """Check if candidate meets user's preferences AND user meets candidate's preferences."""
+    my_filters = user.hard_filters or {}
+    their_filters = candidate.hard_filters or {}
+
+    my_gender = user.gender
+    their_gender = candidate.gender
+
+    # Gender check: both must want each other's gender
+    if my_gender and their_gender:
+        my_seeking = my_filters.get("seeking_gender", [])
+        their_seeking = their_filters.get("seeking_gender", [])
+
+        # I must want their gender
+        if my_seeking and their_gender not in my_seeking:
+            return False
+        # They must want my gender
+        if their_seeking and my_gender not in their_seeking:
+            return False
+
+    return True
+
+
 async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
     # Fetch current user's profile
     result = await db.execute(
@@ -44,10 +67,7 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
         PsychometricProfile.identity_vector.is_not(None),
     ]
 
-    # Gender filter
-    if seeking_genders:
-        conditions.append(User.gender.in_(seeking_genders))
-
+    # Gender filter - bidirectional (in Python after fetch)
     # Age filter
     if max_age_diff and user.age:
         conditions.append(
@@ -136,6 +156,10 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
         else:
             candidate_user, candidate_profile, semantic_sim = row
             comm_sim = None
+
+        # Bidirectional filter check
+        if not _meets_bidirectional_filters(user, candidate_user):
+            continue
 
         semantic_score = float(semantic_sim)
         linguistic_score = float(comm_sim) if comm_sim is not None else semantic_score
