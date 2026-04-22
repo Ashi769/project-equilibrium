@@ -74,7 +74,7 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
       // 2. Create peer connection
       pc = new RTCPeerConnection({ 
         iceServers: ICE_SERVERS,
-        iceTransportPolicy: "all",
+        iceTransportPolicy: "relay", // Force TURN for mobile
         iceCandidatePoolSize: 10,
       });
       pcRef.current = pc;
