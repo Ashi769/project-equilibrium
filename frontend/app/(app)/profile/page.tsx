@@ -1,15 +1,14 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { signOut } from "@/lib/auth";
 import { ProfileForm } from "@/components/profile/ProfileForm";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export default async function ProfilePage() {
   const session = await auth();
-  // DEBUG ProfilePage:", { hasSession: !!session, hasAccessToken: !!session?.accessToken, userId: session?.userId });
 
   if (!session?.accessToken) {
-    // DEBUG ProfilePage: Redirecting to /login (no access token)");
     redirect("/login");
   }
 
@@ -27,7 +26,7 @@ export default async function ProfilePage() {
   if (!profileRes.ok) {
     return (
       <div className="text-center py-20 text-zinc-500">
-        <p>Unable to load profile. Please <a href="/login" className="text-violet-600 underline">sign in again</a>.</p>
+        <p>Unable to load profile. Please <a href="/api/auth/signout" className="text-violet-600 underline">sign out</a> and sign in again.</p>
       </div>
     );
   }
