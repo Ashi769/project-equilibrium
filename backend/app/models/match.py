@@ -1,6 +1,14 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Float, JSON, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import (
+    String,
+    Float,
+    JSON,
+    DateTime,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
@@ -9,19 +17,6 @@ class Match(Base):
     __tablename__ = "matches"
     __table_args__ = (
         UniqueConstraint("user_id", "matched_user_id", name="uq_match_pair"),
-    )
-
-
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
-
-
-class Match(Base):
-    __tablename__ = "matches"
-    __table_args__ = (
-        UniqueConstraint("user_id", "matched_user_id", name="uq_match_pair"),
-        Index("ix_matches_matched_user_id", "matched_user_id"),
-        Index("ix_matches_computed_at", "computed_at"),
     )
 
     id: Mapped[str] = mapped_column(
