@@ -239,9 +239,7 @@ function ConfirmedCard({ meeting, userId, router }: {
       </div>
       <Button
         onClick={() =>
-          router.push(
-            `/meet/${meeting.proposer_id === userId ? meeting.match_id : meeting.proposer_id}?meeting=${meeting.id}`
-          )
+          router.push(`/meet/${meeting.id}?meeting=${meeting.id}`)
         }
         className="gap-2"
       >

@@ -6,6 +6,8 @@ from app.core.security import decode_token
 
 router = APIRouter(tags=["signal"])
 
+logger = logging.getLogger(__name__)
+
 _rooms: dict[str, dict[str, WebSocket]] = {}
 _lock = asyncio.Lock()
 
