@@ -190,7 +190,7 @@ async def _refresh_daily_matches():
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     from sqlalchemy import select, and_
     from app.models.psychometric import PsychometricProfile, AnalysisStatus
-    from app.models.match_cache import MatchCache
+    from app.models.match import Match
     from app.models.user import User
     from app.services.matching_service import compute_and_cache_matches
 

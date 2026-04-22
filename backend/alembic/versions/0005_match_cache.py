@@ -1,4 +1,4 @@
-"""add match_cache and last_matched_at
+"""add matches and last_matched_at
 
 Revision ID: 0005
 Revises: 0004
@@ -20,7 +20,7 @@ def upgrade() -> None:
         sa.Column("last_matched_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_table(
-        "match_cache",
+        "matches",
         sa.Column("id", sa.String(), primary_key=True),
         sa.Column(
             "user_id",
@@ -38,13 +38,13 @@ def upgrade() -> None:
         sa.Column("dimension_scores", sa.JSON(), nullable=False),
         sa.Column("computed_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_index("ix_match_cache_user_id", "match_cache", ["user_id"])
+    op.create_index("ix_matches_user_id", "matches", ["user_id"])
     op.create_unique_constraint(
-        "uq_match_cache_pair", "match_cache", ["user_id", "matched_user_id"]
+        "uq_matches_pair", "matches", ["user_id", "matched_user_id"]
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_match_cache_user_id", "match_cache")
-    op.drop_table("match_cache")
+    op.drop_index("ix_matches_user_id", "matches")
+    op.drop_table("matches")
     op.drop_column("users", "last_matched_at")

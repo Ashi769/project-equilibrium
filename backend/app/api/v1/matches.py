@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.config import settings
 from app.models.user import User
-from app.models.match_cache import MatchCache
+from app.models.match import Match
 from app.schemas.matches import MatchSummary, MatchDetail
 from app.services.matching_service import get_match_detail
 
@@ -23,9 +23,9 @@ async def list_matches(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(MatchCache)
-        .where(MatchCache.user_id == current_user.id)
-        .order_by(MatchCache.compatibility_score.desc())
+        select(Match)
+        .where(Match.user_id == current_user.id)
+        .order_by(Match.compatibility_score.desc())
     )
     caches = result.scalars().all()
 

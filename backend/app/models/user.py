@@ -47,9 +47,9 @@ class User(Base):
     photos: Mapped[list["UserPhoto"]] = relationship(
         "UserPhoto", back_populates="user", lazy="select"
     )
-    cached_matches: Mapped[list["MatchCache"]] = relationship(
-        "MatchCache",
+    cached_matches: Mapped[list["Match"]] = relationship(
+        "Match",
         back_populates="user",
-        foreign_keys="MatchCache.user_id",
+        foreign_keys="Match.user_id",
         lazy="select",
     )

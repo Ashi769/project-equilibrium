@@ -271,8 +271,8 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
 
 
 async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
-    """Compute matches for a user and store in MatchCache."""
-    from app.models.match_cache import MatchCache
+    """Compute matches for a user and store in Match."""
+    from app.models.match import Match
     from sqlalchemy import delete
 
     if not user.psychometric_profile or not user.psychometric_profile.aspiration_vector:
@@ -280,11 +280,11 @@ async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchS
 
     matches = await get_matches(user, db)
 
-    await db.execute(delete(MatchCache).where(MatchCache.user_id == user.id))
+    await db.execute(delete(Match).where(Match.user_id == user.id))
 
     for match in matches:
         db.add(
-            MatchCache(
+            Match(
                 user_id=user.id,
                 matched_user_id=match.id,
                 compatibility_score=match.compatibility_score,
