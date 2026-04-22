@@ -77,6 +77,9 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         iceTransportPolicy: "all",
         iceCandidatePoolSize: 10,
       });
+      
+      // Connection stability
+      pc.connectionState === "new" && console.log("webrtc: connection initialized");
       pcRef.current = pc;
 
       if (stream) {
@@ -98,13 +101,18 @@ pc.ontrack = (e) => {
         }
       };
 
-      pc.oniceconnectionstatechange = () => {
+pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
         console.log("webrtc: ICE state →", state);
-        if (state === "connected" || state === "completed") setConnected(true);
+        if (state === "connected" || state === "completed") {
+          setConnected(true);
+        }
         if (state === "disconnected") {
-          console.log("webrtc: ICE disconnected, restarting...");
-          setTimeout(() => pc.restartIce(), 2000);
+          console.log("webrtc: ICE disconnected, refreshing candidates...");
+          pc.createOffer({ iceRestart: true }).then(offer => {
+            pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
+          }).catch(e => console.error("webrtc: refresh offer failed:", e));
         }
         if (state === "failed") {
           console.log("webrtc: ICE failed, restarting...");
