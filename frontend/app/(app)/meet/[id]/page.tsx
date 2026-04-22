@@ -75,6 +75,7 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
       pc = new RTCPeerConnection({ 
         iceServers: ICE_SERVERS,
         iceTransportPolicy: "all",
+        iceCandidatePoolSize: 10,
       });
       pcRef.current = pc;
 
@@ -102,25 +103,12 @@ pc.ontrack = (e) => {
         console.log("webrtc: ICE state →", state);
         if (state === "connected" || state === "completed") setConnected(true);
         if (state === "disconnected") {
-          console.log("webrtc: ICE disconnected, attempting reconnection...");
-          setTimeout(() => {
-            if (pc.iceConnectionState === "disconnected") {
-              // Force TURN relay
-              pc.createDataChannel("reconnect");
-              pc.createOffer().then(offer => {
-                offer.sdp = offer.sdp.replace(/a=candidate:.*\r\n/g, "");
-                pc.setLocalDescription(offer);
-                ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
-              });
-            }
-          }, 2000);
+          console.log("webrtc: ICE disconnected, restarting...");
+          setTimeout(() => pc.restartIce(), 2000);
         }
         if (state === "failed") {
-          console.log("webrtc: ICE failed, creating new offer...");
-          pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true }).then(offer => {
-            pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
-          });
+          console.log("webrtc: ICE failed, restarting...");
+          pc.restartIce();
         }
       };
 
