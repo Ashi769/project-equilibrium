@@ -13,6 +13,12 @@ interface MatchSummary {
   compatibility_score: number;
   top_dimensions: { label: string; score: number }[];
 }
+
+interface MatchWithPhoto extends MatchSummary {
+  photo_url: string | null;
+  carousel: { url: string; is_selfie: boolean }[];
+}
+
 interface ProfileStatus { analysis_status: "pending" | "processing" | "complete" | "failed" | null; }
 
 const LOGIC_LABELS: Record<string, string[]> = {
@@ -49,7 +55,7 @@ export function SelectionClient({
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const isProcessingParam = searchParams.get("processing") === "true";
 
-  const { data: status } = useQuery({
+const { data: status } = useQuery({
     queryKey: ["profile-status"],
     queryFn: () => api.get<ProfileStatus>("/api/v1/profile/analysis-status", accessToken),
     initialData: initialStatus,
@@ -57,14 +63,31 @@ export function SelectionClient({
   });
 
   const analysisStatus = status?.analysis_status ?? null;
-  const isProcessing   = isProcessingParam || analysisStatus === "processing";
-  const isComplete     = analysisStatus === "complete" || analysisStatus === "failed";
+  const isProcessing = isProcessingParam || analysisStatus === "processing";
+  const isReady = analysisStatus === "complete" || analysisStatus === "failed";
 
   const { data: matches } = useQuery({
     queryKey: ["matches"],
-    queryFn: () => api.get<MatchSummary[]>("/api/v1/matches", accessToken),
-    initialData: initialMatches,
-    enabled: isComplete,
+    queryFn: async () => {
+      const raw = await api.get<MatchSummary[]>("/api/v1/matches", accessToken);
+      if (!raw) return [];
+      const withPhotos = await Promise.all(
+        raw.map(async (m) => {
+          try {
+            const res = await fetch(
+              `${process.env.NEXT_PUBLIC_API_URL}/api/v1/photos/user/${m.id}/carousel`
+            );
+            const carousel = res.ok ? await res.json() : [];
+            return { ...m, photo_url: null, carousel } as MatchWithPhoto;
+          } catch {
+            return { ...m, photo_url: null, carousel: [] } as MatchWithPhoto;
+          }
+        })
+      );
+      return withPhotos;
+    },
+    initialData: initialMatches as MatchWithPhoto[],
+    enabled: isReady,
   });
 
   /* ─── Loading states ─── */
@@ -101,7 +124,7 @@ export function SelectionClient({
     );
   }
 
-  if (!isComplete) {
+  if (!isReady) {
     return (
       <div className="flex flex-col items-center justify-center py-40 gap-8 text-center">
         <div
@@ -135,11 +158,12 @@ export function SelectionClient({
   const displayed = matches.slice(0, 5);
 
   /* ─── Mobile: scrollable card grid ─── */
-  const MobileCard = ({ match }: { match: MatchSummary }) => {
+  const MobileCard = ({ match }: { match: MatchWithPhoto }) => {
     const [expanded, setExpanded] = useState(false);
     const pct = Math.round(match.compatibility_score * 100);
     const logic = matchLogic(match.top_dimensions);
     const initials = match.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+    const photo = match.carousel?.[0];
 
     return (
       <div
@@ -151,10 +175,28 @@ export function SelectionClient({
         }}
         onClick={() => setExpanded(!expanded)}
       >
+        <div
+          className="h-32 bg-cover bg-center flex items-end"
+          style={{
+            backgroundImage: photo ? `url(${photo.url})` : undefined,
+            backgroundColor: photo ? undefined : "var(--postit)",
+          }}
+        >
+          {!photo && (
+            <div
+              className="w-full h-full flex items-center justify-center"
+              style={{ background: "var(--postit)" }}
+            >
+              <span className="font-heading font-bold text-4xl" style={{ color: "var(--ink)" }}>
+                {initials}
+              </span>
+            </div>
+          )}
+        </div>
         <div className="p-4">
           <div className="flex items-center gap-3">
             <div
-              className="w-12 h-12 flex items-center justify-center border-2 border-[#2d2d2d] flex-shrink-0"
+              className="w-10 h-10 flex items-center justify-center border-2 border-[#2d2d2d] flex-shrink-0"
               style={{ background: "var(--postit)", borderRadius: "var(--radius-wobbly-sm)" }}
             >
               <span className="font-heading font-bold" style={{ color: "var(--ink)" }}>{initials}</span>
@@ -232,6 +274,7 @@ export function SelectionClient({
           const initials = match.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
           const isHovered = hoveredIdx === i;
           const isDimmed  = hoveredIdx !== null && !isHovered;
+          const photo = match.carousel?.[0];
 
           return (
             <motion.div
@@ -243,32 +286,44 @@ export function SelectionClient({
               transition={{ duration: 0.38, ease: [0.4, 0, 0.2, 1] }}
               className="relative flex-1 overflow-hidden cursor-pointer"
               style={{
-                background: colBgs[i % colBgs.length],
+                background: photo ? undefined : colBgs[i % colBgs.length],
+                backgroundImage: photo ? `url(${photo.url})` : undefined,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
                 borderRight: i < displayed.length - 1 ? "2px solid #2d2d2d" : undefined,
                 minWidth: 0,
               }}
               onMouseEnter={() => setHoveredIdx(i)}
               onMouseLeave={() => setHoveredIdx(null)}
             >
-              {/* Large watermark initials */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
-                <span
-                  className="font-heading font-bold"
-                  style={{ fontSize: "8rem", color: "rgba(45,45,45,0.06)", lineHeight: 1 }}
-                >
-                  {initials}
-                </span>
-              </div>
+              {/* Large watermark initials (only if no photo) */}
+              {!photo && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
+                  <span
+                    className="font-heading font-bold"
+                    style={{ fontSize: "8rem", color: "rgba(45,45,45,0.06)", lineHeight: 1 }}
+                  >
+                    {initials}
+                  </span>
+                </div>
+              )}
+
+              {/* Dark overlay on hover */}
+              <motion.div
+                animate={{ opacity: isHovered ? 0.7 : 0 }}
+                transition={{ duration: 0.2 }}
+                className="absolute inset-0 bg-black pointer-events-none"
+              />
 
               {/* Bottom content */}
               <div className="absolute inset-x-0 bottom-0 p-5">
                 {/* Name + score — always visible */}
                 <div className="flex items-end justify-between mb-3">
-                  <div>
-                    <p className="font-heading text-lg font-bold leading-tight" style={{ color: "var(--ink)" }}>
+                  <div className="bg-white/90 px-2 py-1 rounded">
+                    <p className="font-heading text-lg font-bold leading-tight text-[#2d2d2d]">
                       {match.name}
                     </p>
-                    <p className="text-sm" style={{ color: "var(--muted)" }}>{match.age} yrs</p>
+                    <p className="text-sm text-[#5a5a5a]">{match.age} yrs</p>
                   </div>
                   <div
                     className="w-12 h-12 flex flex-col items-center justify-center border-2 border-[#2d2d2d] flex-shrink-0"
@@ -285,14 +340,14 @@ export function SelectionClient({
                   transition={{ duration: 0.28, delay: isHovered ? 0.08 : 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="mb-3 pt-3 border-t-2 border-dashed border-[#2d2d2d]">
-                    <p className="text-xs font-medium uppercase tracking-widest mb-2" style={{ color: "var(--muted)" }}>
+                  <div className="mb-3 pt-3 border-t-2 border-dashed border-white/70">
+                    <p className="text-xs font-medium uppercase tracking-widest mb-2 text-white/80">
                       Match Logic
                     </p>
                     <ul className="space-y-1">
                       {logic.map((l) => (
-                        <li key={l} className="text-sm flex items-start gap-2" style={{ color: "var(--ink)" }}>
-                          <span style={{ color: "var(--muted)" }}>→</span>
+                        <li key={l} className="text-sm flex items-start gap-2 text-white">
+                          <span className="text-white/60">→</span>
                           {l}
                         </li>
                       ))}
