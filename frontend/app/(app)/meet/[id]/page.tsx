@@ -382,7 +382,13 @@ export default function MeetPage() {
 
       <div className="flex-1 relative">
         {/* Remote video — full screen */}
-        <video ref={remoteVideoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" style={{ display: connected ? "block" : "none" }} />
+        <video 
+          ref={remoteVideoRef} 
+          autoPlay 
+          playsInline
+          muted={false}
+          className="absolute inset-0 w-full h-full object-cover"
+        />
 
         {!connected && (
           <div className="absolute inset-0 flex items-center justify-center" style={{ background: "#0f0e0c" }}>
