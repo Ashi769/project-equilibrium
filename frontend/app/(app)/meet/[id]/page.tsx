@@ -14,8 +14,8 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun2.l.google.com:19302" },
   { urls: "stun:stun3.l.google.com:19302" },
   { urls: "stun:stun4.l.google.com:19302" },
-  { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayprojectsecret" },
   { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayprojectsecret" },
+  { urls: "turn:openrelay.metered.ca:80?transport=tcp", username: "openrelayproject", credential: "openrelayprojectsecret" },
 ];
 
 const AI_PROMPTS = [
@@ -72,7 +72,10 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
       }
 
       // 2. Create peer connection
-      pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      pc = new RTCPeerConnection({ 
+        iceServers: ICE_SERVERS,
+        iceTransportPolicy: "all",
+      });
       pcRef.current = pc;
 
       if (stream) {
@@ -102,13 +105,20 @@ pc.ontrack = (e) => {
           console.log("webrtc: ICE disconnected, attempting reconnection...");
           setTimeout(() => {
             if (pc.iceConnectionState === "disconnected") {
-              pc.restartIce();
+              // Force TURN relay
+              pc.createDataChannel("reconnect");
+              pc.createOffer().then(offer => {
+                offer.sdp = offer.sdp.replace(/a=candidate:.*\r\n/g, "");
+                pc.setLocalDescription(offer);
+                ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
+              });
             }
           }, 2000);
         }
         if (state === "failed") {
           console.log("webrtc: ICE failed, creating new offer...");
-          pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
+          pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true }).then(offer => {
+            pc.setLocalDescription(offer);
             ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
           });
         }
