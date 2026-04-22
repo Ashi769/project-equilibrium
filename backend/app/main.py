@@ -17,8 +17,6 @@ from app.api.v1 import (
     signal,
 )
 
-logger = logging.getLogger(__name__)
-
 limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
@@ -31,15 +29,9 @@ app = FastAPI(
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    logger.info(f"[DEBUG] Backend request: {request.method} {request.url.path}")
     response = await call_next(request)
-    logger.info(
-        f"[DEBUG] Backend response: {request.method} {request.url.path} -> {response.status_code}"
-    )
     return response
 
-
-logger.info(f"[DEBUG] Backend starting, environment: {settings.environment}")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

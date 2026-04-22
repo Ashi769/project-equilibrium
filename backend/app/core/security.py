@@ -27,9 +27,6 @@ def create_token(
         "iat": datetime.now(timezone.utc),
         **(extra or {}),
     }
-    logger.info(
-        f"[DEBUG] Creating token for subject: {subject}, type: {extra.get('type', 'unknown') if extra else 'none'}"
-    )
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
@@ -50,13 +47,9 @@ def create_refresh_token(user_id: str) -> str:
 
 
 def decode_token(token: str) -> dict[str, Any]:
-    logger.info("[DEBUG] Decoding token")
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
-        logger.info(
-            f"[DEBUG] Token decoded successfully, sub: {payload.get('sub')}, type: {payload.get('type')}"
-        )
         return payload
     except JWTError as e:
-        logger.error(f"[DEBUG] Token decode failed: {e}")
+        logger.error(f"Token decode failed: {e}")
         raise ValueError(f"Invalid token: {e}") from e

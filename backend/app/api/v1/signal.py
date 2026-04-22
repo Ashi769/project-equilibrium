@@ -4,10 +4,6 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.security import decode_token
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("signal")
-logger.setLevel(logging.DEBUG)
-
 router = APIRouter(tags=["signal"])
 
 _rooms: dict[str, dict[str, WebSocket]] = {}
@@ -58,14 +54,18 @@ async def signaling(ws: WebSocket, meeting_id: str):
         existing_peers = [uid for uid in room if uid != user_id]
         room[user_id] = ws
 
-    logger.info(f"signal: {user_id[:8]} joined room {meeting_id[:8]}, peers={existing_peers}")
+    logger.info(
+        f"signal: {user_id[:8]} joined room {meeting_id[:8]}, peers={existing_peers}"
+    )
 
     if existing_peers:
         try:
-            await ws.send_json({
-                "type": "peer-joined",
-                "role": "offerer",
-            })
+            await ws.send_json(
+                {
+                    "type": "peer-joined",
+                    "role": "offerer",
+                }
+            )
         except Exception as e:
             logger.error(f"signal: failed to notify newcomer: {e}")
 
@@ -74,10 +74,12 @@ async def signaling(ws: WebSocket, meeting_id: str):
                 peer_ws = _rooms.get(meeting_id, {}).get(pid)
             if peer_ws:
                 try:
-                    await peer_ws.send_json({
-                        "type": "peer-joined",
-                        "role": "answerer",
-                    })
+                    await peer_ws.send_json(
+                        {
+                            "type": "peer-joined",
+                            "role": "answerer",
+                        }
+                    )
                 except Exception as e:
                     logger.error(f"signal: failed to notify existing peer: {e}")
 
@@ -96,10 +98,12 @@ async def signaling(ws: WebSocket, meeting_id: str):
 
             for pid, peer_ws in peers.items():
                 try:
-                    await peer_ws.send_json({
-                        "type": msg_type,
-                        "data": msg.get("data"),
-                    })
+                    await peer_ws.send_json(
+                        {
+                            "type": msg_type,
+                            "data": msg.get("data"),
+                        }
+                    )
                 except Exception as e:
                     logger.error(f"signal: relay {msg_type} to {pid[:8]} failed: {e}")
 
