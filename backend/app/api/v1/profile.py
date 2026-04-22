@@ -2,12 +2,11 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.models.psychometric import PsychometricProfile, AnalysisStatus
+from app.models.psychometric import AnalysisStatus
 from app.schemas.profile import ProfileResponse, ProfileUpdateRequest
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -45,13 +44,7 @@ async def get_profile(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(PsychometricProfile).where(
-            PsychometricProfile.user_id == current_user.id
-        )
-    )
-    profile = result.scalar_one_or_none()
-    return _build_profile_response(current_user, profile)
+    return _build_profile_response(current_user, current_user.psychometric_profile)
 
 
 @router.patch("", response_model=ProfileResponse)
@@ -67,18 +60,11 @@ async def update_profile(
         attrs = body.attributes.model_dump(exclude_none=True)
         for key, value in attrs.items():
             setattr(current_user, key, value)
-        db.add(current_user)
 
     await db.commit()
     await db.refresh(current_user)
 
-    result = await db.execute(
-        select(PsychometricProfile).where(
-            PsychometricProfile.user_id == current_user.id
-        )
-    )
-    profile = result.scalar_one_or_none()
-    return _build_profile_response(current_user, profile)
+    return _build_profile_response(current_user, current_user.psychometric_profile)
 
 
 @router.get("/analysis-status")
@@ -86,12 +72,7 @@ async def analysis_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(PsychometricProfile).where(
-            PsychometricProfile.user_id == current_user.id
-        )
-    )
-    profile = result.scalar_one_or_none()
+    profile = current_user.psychometric_profile
     if not profile:
         return {"analysis_status": "pending"}
 
