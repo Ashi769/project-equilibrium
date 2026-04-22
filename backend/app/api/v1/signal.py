@@ -90,7 +90,11 @@ async def signaling(ws: WebSocket, meeting_id: str):
 
     try:
         while True:
-            raw = await ws.receive_text()
+            try:
+                raw = await asyncio.wait_for(ws.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                await ws.send_json({"type": "ping"})
+                continue
             msg = json.loads(raw)
             msg_type = msg.get("type")
 
