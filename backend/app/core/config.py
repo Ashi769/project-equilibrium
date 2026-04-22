@@ -50,8 +50,8 @@ class Settings(BaseSettings):
 
     # JWT
     secret_key: str = "change_me_in_production"
-    access_token_expire_minutes: int = 60 * 24  # 24 hours
-    refresh_token_expire_days: int = 30
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
 
     # Google OAuth
     google_client_id: str = ""
