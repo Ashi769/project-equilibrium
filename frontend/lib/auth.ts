@@ -104,7 +104,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           token.accessToken = data.access_token;
           token.refreshToken = data.refresh_token;
           token.userId = data.user.id;
-          token.accessTokenExpires = Date.now() + 14 * 60 * 1000;
+          token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
           return token;
         }
       }
@@ -114,7 +114,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.accessToken = (user as any).accessToken;
         token.refreshToken = (user as any).refreshToken;
         token.userId = user.id;
-        token.accessTokenExpires = Date.now() + 14 * 60 * 1000; // 14 min
+        token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
         return token;
       }
 
@@ -125,7 +125,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           token.accessToken = data.access_token;
           token.refreshToken = data.refresh_token;
           token.userId = data.user.id;
-          token.accessTokenExpires = Date.now() + 14 * 60 * 1000;
+          token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
         }
         return token;
       }
@@ -145,7 +145,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (data) {
         token.accessToken = data.access_token;
         token.refreshToken = data.refresh_token;
-        token.accessTokenExpires = Date.now() + 14 * 60 * 1000;
+        token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
       } else {
         // Refresh failed — clear tokens so pages can redirect to login
         token.accessToken = undefined;
