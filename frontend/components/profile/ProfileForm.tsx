@@ -90,10 +90,16 @@ export function ProfileForm({
   });
 
   const updateAttrMutation = useMutation({
-    mutationFn: (data: { height?: number; drinking?: string; smoking?: string; religion?: string; language?: string; food_preference?: string }) =>
+    mutationFn: (data: { height?: number; drinking?: string; smoking?: string; religion?: string; food_preference?: string }) =>
       api.patch("/api/v1/profile", { attributes: data }, accessToken),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["profile"] }),
   });
+
+  const heightRef = useRef<HTMLInputElement>(null);
+  const drinkingRef = useRef<HTMLSelectElement>(null);
+  const smokingRef = useRef<HTMLSelectElement>(null);
+  const religionRef = useRef<HTMLSelectElement>(null);
+  const foodRef = useRef<HTMLSelectElement>(null);
 
   const reinterviewMutation = useMutation({
     mutationFn: () => api.post("/api/v1/interview/reset", {}, accessToken),
@@ -274,11 +280,12 @@ export function ProfileForm({
                     placeholder="165" 
                     className="w-full"
                     defaultValue={profile.height ?? undefined}
+                    ref={heightRef}
                   />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Drinking</label>
-                  <select style={wobblySelect} defaultValue={profile.drinking ?? ""}>
+                  <select style={wobblySelect} defaultValue={profile.drinking ?? ""} ref={drinkingRef}>
                     <option value="">Select</option>
                     <option value="never">Never</option>
                     <option value="sometimes">Sometimes</option>
@@ -287,7 +294,7 @@ export function ProfileForm({
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Smoking</label>
-                  <select style={wobblySelect} defaultValue={profile.smoking ?? ""}>
+                  <select style={wobblySelect} defaultValue={profile.smoking ?? ""} ref={smokingRef}>
                     <option value="">Select</option>
                     <option value="never">Never</option>
                     <option value="sometimes">Sometimes</option>
@@ -296,14 +303,14 @@ export function ProfileForm({
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Religion</label>
-                  <select style={wobblySelect} defaultValue={profile.religion ?? ""}>
+                  <select style={wobblySelect} defaultValue={profile.religion ?? ""} ref={religionRef}>
                     <option value="">Select</option>
                     {RELIGIONS.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Food preference</label>
-                  <select style={wobblySelect} defaultValue={profile.food_preference ?? ""}>
+                  <select style={wobblySelect} defaultValue={profile.food_preference ?? ""} ref={foodRef}>
                     <option value="">Select</option>
                     <option value="veg">Vegetarian</option>
                     <option value="non-veg">Non-vegetarian</option>
@@ -315,11 +322,11 @@ export function ProfileForm({
               <div className="flex gap-2">
                 <Button 
                   onClick={() => {
-                    const h = parseInt((document.querySelector('[placeholder="165"]') as HTMLInputElement)?.value) || undefined;
-                    const d = (document.querySelector('select:nth-of-type(4)') as HTMLSelectElement)?.value || undefined;
-                    const s = (document.querySelector('select:nth-of-type(5)') as HTMLSelectElement)?.value || undefined;
-                    const r = (document.querySelector('select:nth-of-type(6)') as HTMLSelectElement)?.value || undefined;
-                    const f = (document.querySelector('select:nth-of-type(7)') as HTMLSelectElement)?.value || undefined;
+                    const h = heightRef.current?.value ? parseInt(heightRef.current.value) : undefined;
+                    const d = drinkingRef.current?.value || undefined;
+                    const s = smokingRef.current?.value || undefined;
+                    const r = religionRef.current?.value || undefined;
+                    const f = foodRef.current?.value || undefined;
                     updateAttrMutation.mutate({ 
                       height: h, drinking: d, smoking: s, religion: r, food_preference: f 
                     });
