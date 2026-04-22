@@ -81,13 +81,16 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         }
       }
 
-      pc.ontrack = (e) => {
-        console.log("webrtc: remote track received", e.track.kind);
-if (remoteVideoRef.current && e.streams[0]) {
-          remoteVideoRef.current.srcObject = e.streams[0];
+pc.ontrack = (e) => {
+        console.log("webrtc: ontrack fired", e.track.kind, e.streams);
+        if (remoteVideoRef.current) {
+          const stream = e.streams[0];
+          remoteVideoRef.current.srcObject = stream;
+          remoteVideoRef.current.play().catch(console.error);
+          stream.getTracks().forEach(track => {
+            console.log("webrtc: track", track.kind, "enabled:", track.enabled);
+          });
           setConnected(true);
-          console.log("webrtc: attached stream to video element, tracks:", e.streams[0].getTracks().map(t => t.kind));
-          console.log("webrtc: video element visible:", remoteVideoRef.current.style.display);
         }
       };
 
