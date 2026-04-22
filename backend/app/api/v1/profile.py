@@ -67,6 +67,10 @@ async def update_profile(
         attrs = body.attributes.model_dump(exclude_none=True)
         for key, value in attrs.items():
             setattr(current_user, key, value)
+        db.add(current_user)
+
+    await db.commit()
+    await db.refresh(current_user)
 
     result = await db.execute(
         select(PsychometricProfile).where(
@@ -74,7 +78,6 @@ async def update_profile(
         )
     )
     profile = result.scalar_one_or_none()
-    await db.commit()
     return _build_profile_response(current_user, profile)
 
 
