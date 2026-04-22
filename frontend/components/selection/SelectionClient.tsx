@@ -55,7 +55,7 @@ export function SelectionClient({
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const isProcessingParam = searchParams.get("processing") === "true";
 
-  const { data: status } = useQuery({
+const { data: status } = useQuery({
     queryKey: ["profile-status"],
     queryFn: () => api.get<ProfileStatus>("/api/v1/profile/analysis-status", accessToken),
     initialData: initialStatus,
@@ -63,9 +63,8 @@ export function SelectionClient({
   });
 
   const analysisStatus = status?.analysis_status ?? null;
-  const isProcessing   = isProcessingParam || analysisStatus === "processing";
-  const hasMatches     = initialMatches && initialMatches.length > 0;
-  const isComplete     = analysisStatus === "complete" || (analysisStatus === "failed" && hasMatches);
+  const isProcessing = isProcessingParam || analysisStatus === "processing";
+  const isReady = analysisStatus === "complete" || analysisStatus === "failed";
 
   const { data: matches } = useQuery({
     queryKey: ["matches"],
@@ -88,7 +87,7 @@ export function SelectionClient({
       return withPhotos;
     },
     initialData: initialMatches as MatchWithPhoto[],
-    enabled: isComplete,
+    enabled: isReady,
   });
 
   /* ─── Loading states ─── */
@@ -125,7 +124,7 @@ export function SelectionClient({
     );
   }
 
-  if (!isComplete) {
+  if (!isReady) {
     return (
       <div className="flex flex-col items-center justify-center py-40 gap-8 text-center">
         <div
