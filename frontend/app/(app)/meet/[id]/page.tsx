@@ -83,10 +83,11 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
 
       pc.ontrack = (e) => {
         console.log("webrtc: remote track received", e.track.kind);
-        if (remoteVideoRef.current && e.streams[0]) {
+if (remoteVideoRef.current && e.streams[0]) {
           remoteVideoRef.current.srcObject = e.streams[0];
-setConnected(true);
-        console.log("webrtc: SET CONNECTED TRUE - video should be visible");
+          setConnected(true);
+          console.log("webrtc: attached stream to video element, tracks:", e.streams[0].getTracks().map(t => t.kind));
+          console.log("webrtc: video element visible:", remoteVideoRef.current.style.display);
         }
       };
 
