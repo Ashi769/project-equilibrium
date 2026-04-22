@@ -85,7 +85,8 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         console.log("webrtc: remote track received", e.track.kind);
         if (remoteVideoRef.current && e.streams[0]) {
           remoteVideoRef.current.srcObject = e.streams[0];
-          setConnected(true);
+setConnected(true);
+        console.log("webrtc: SET CONNECTED TRUE - video should be visible");
         }
       };
 
@@ -98,8 +99,10 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
 
       // Timeout for peer connection
       setTimeout(() => {
-        if (!connected) {
-          console.log("webrtc: timeout waiting for peer connection");
+        if (pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
+          console.log("webrtc: timeout - ICE state:", pc.iceConnectionState);
+        } else {
+          console.log("webrtc: connection established, ICE state:", pc.iceConnectionState);
         }
       }, 30000);
 
