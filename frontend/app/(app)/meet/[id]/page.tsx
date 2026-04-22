@@ -397,13 +397,14 @@ export default function MeetPage() {
         </button>
       </div>
 
-      <div className="flex-1 relative" style={{ minHeight: "300px" }}>
+      <div className="flex-1 relative" style={{ flex: 1, minHeight: 0, height: "calc(100vh - 50px)" }}>
         {/* Remote video — full screen */}
-<video 
+        <video 
           ref={remoteVideoRef} 
           autoPlay 
           playsInline
           className="absolute inset-0 w-full h-full object-cover"
+          style={{ width: "100%", height: "100%" }}
         />
         <div id="remote-video-debug" style={{ position: "absolute", top: 0, left: 0, color: "white", zIndex: 100, fontSize: "12px" }}>
           Stream: {remoteVideoRef.current?.srcObject ? "attached" : "none"} | 
