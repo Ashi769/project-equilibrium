@@ -1,16 +1,11 @@
 import asyncio
-import os
 from logging.config import fileConfig
-
 import sqlalchemy as sa
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
-
 from app.core.config import settings
-import app.models  # noqa: F401
 
 config = context.config
 
@@ -22,16 +17,10 @@ config.set_main_option(
     settings.database_url.replace("+asyncpg", ""),
 )
 
-from app.core.database import Base
-
-target_metadata = Base.metadata
-
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
-        target_metadata=target_metadata,
+        url=config.get_main_option("sqlalchemy.url"),
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -40,14 +29,12 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(connection=connection, renderers=[])
     with context.begin_transaction():
         context.run_migrations()
 
 
 async def run_async_migrations() -> None:
-    from sqlalchemy.ext.asyncio import create_async_engine
-
     connectable = create_async_engine(
         settings.async_database_url,
         poolclass=pool.NullPool,
@@ -59,7 +46,7 @@ async def run_async_migrations() -> None:
 
         result = await conn.execute(
             sa.text(
-                "SELECT 1 FROM information_schema.table_constraints WHERE table_name='users' AND constraint_type='PRIMARY KEY'"
+                "SELECT 1 FROM information_schema.table_constraints WHERE table_name='users' AND constraint_type='PRIMARY KEY' AND table_schema='public'"
             )
         )
         if not result.fetchone():
@@ -67,24 +54,18 @@ async def run_async_migrations() -> None:
 
         result = await conn.execute(
             sa.text(
-                "SELECT column_name FROM information_schema.columns WHERE table_name='matches' AND column_name='matched_user_id'"
+                "SELECT column_name FROM information_schema.columns WHERE table_name='matches' AND column_name='user_a_id' AND table_schema='public'"
             )
         )
-        if not result.fetchone():
-            has_user_a = await conn.execute(
+        if result.fetchone():
+            await conn.execute(
+                sa.text("ALTER TABLE matches RENAME COLUMN user_a_id TO user_id")
+            )
+            await conn.execute(
                 sa.text(
-                    "SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='user_a_id'"
+                    "ALTER TABLE matches RENAME COLUMN user_b_id TO matched_user_id"
                 )
             )
-            if has_user_a.fetchone():
-                await conn.execute(
-                    sa.text("ALTER TABLE matches RENAME COLUMN user_a_id TO user_id")
-                )
-                await conn.execute(
-                    sa.text(
-                        "ALTER TABLE matches RENAME COLUMN user_b_id TO matched_user_id"
-                    )
-                )
 
         await conn.commit()
 
@@ -96,6 +77,12 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     asyncio.run(run_async_migrations())
+
+
+async def create_async_engine(*args, **kwargs):
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    return create_async_engine(*args, **kwargs)
 
 
 if context.is_offline_mode():
