@@ -11,6 +11,9 @@ const WS_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/^http/, "ws") ?? "ws://
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun2.l.google.com:19302" },
+  { urls: "stun:stun3.l.google.com:19302" },
+  { urls: "stun:stun4.l.google.com:19302" },
 ];
 
 const AI_PROMPTS = [
@@ -67,9 +70,15 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
       }
 
       // 2. Create peer connection
-      pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      pc = new RTCPeerConnection({
+        iceServers: ICE_SERVERS,
+        iceCandidatePoolSize: 10,
+      });
       pcRef.current = pc;
 
+      // Force ICE candidate gathering
+      pc.createDataChannel("test");
+      
       if (stream) {
         for (const track of stream.getTracks()) {
           pc.addTrack(track, stream);
@@ -90,6 +99,13 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         if (state === "connected" || state === "completed") setConnected(true);
         if (state === "disconnected" || state === "failed") setConnected(false);
       };
+
+      // Timeout for peer connection
+      setTimeout(() => {
+        if (!connected) {
+          console.log("webrtc: timeout waiting for peer connection");
+        }
+      }, 30000);
 
       // 3. Open signaling WebSocket
       ws = new WebSocket(`${WS_URL}/api/v1/signal/${meetingId}?token=${token}`);
