@@ -3,6 +3,7 @@ from logging.config import fileConfig
 import sqlalchemy as sa
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 from app.core.config import settings
@@ -46,14 +47,6 @@ async def run_async_migrations() -> None:
 
         result = await conn.execute(
             sa.text(
-                "SELECT 1 FROM information_schema.table_constraints WHERE table_name='users' AND constraint_type='PRIMARY KEY' AND table_schema='public'"
-            )
-        )
-        if not result.fetchone():
-            await conn.execute(sa.text("ALTER TABLE users ADD PRIMARY KEY (id)"))
-
-        result = await conn.execute(
-            sa.text(
                 "SELECT column_name FROM information_schema.columns WHERE table_name='matches' AND column_name='user_a_id' AND table_schema='public'"
             )
         )
@@ -77,12 +70,6 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     asyncio.run(run_async_migrations())
-
-
-async def create_async_engine(*args, **kwargs):
-    from sqlalchemy.ext.asyncio import create_async_engine
-
-    return create_async_engine(*args, **kwargs)
 
 
 if context.is_offline_mode():
