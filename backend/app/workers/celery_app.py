@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from app.core.config import settings
 
 celery_app = Celery(
@@ -17,3 +18,11 @@ celery_app.conf.update(
     task_track_started=True,
     worker_prefetch_multiplier=1,
 )
+
+celery_app.conf.beat_schedule = {
+    "daily-match-refresh": {
+        "task": "app.workers.tasks.refresh_daily_matches",
+        "schedule": crontab(hour=3, minute=0),
+        "options": {"queue": "default"},
+    },
+}

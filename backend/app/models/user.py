@@ -31,6 +31,9 @@ class User(Base):
     food_preference: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     hard_filters: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    last_matched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -43,4 +46,7 @@ class User(Base):
     )
     photos: Mapped[list["UserPhoto"]] = relationship(
         "UserPhoto", back_populates="user", lazy="select"
+    )
+    cached_matches: Mapped[list["MatchCache"]] = relationship(
+        "MatchCache", back_populates="user", lazy="select"
     )

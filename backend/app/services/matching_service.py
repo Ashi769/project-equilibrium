@@ -41,12 +41,12 @@ def _meets_bidirectional_filters(user: User, candidate: User) -> bool:
 
     # Gender check: both must want each other's gender
     if my_gender and their_gender:
-        my_seeking = my_filters.get("seeking_gender", [])
-        their_seeking = their_filters.get("seeking_gender", [])
+        my_seeking = my_filters.get("seeking_gender")
+        their_seeking = their_filters.get("seeking_gender")
 
-        if my_seeking and their_gender not in my_seeking:
+        if their_seeking and their_gender not in their_seeking:
             return False
-        if their_seeking and my_gender not in their_seeking:
+        if my_seeking and my_gender not in my_seeking:
             return False
 
     # Religion: both must have matching preferences
@@ -268,6 +268,32 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
     # Sort by final score after penalties
     matches.sort(key=lambda m: m.compatibility_score, reverse=True)
     return matches[:TOP_N]
+
+
+async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
+    """Compute matches for a user and store in MatchCache."""
+    from app.models.match_cache import MatchCache
+    from sqlalchemy import delete
+
+    if not user.psychometric_profile or not user.psychometric_profile.aspiration_vector:
+        return []
+
+    matches = await get_matches(user, db)
+
+    await db.execute(delete(MatchCache).where(MatchCache.user_id == user.id))
+
+    for match in matches:
+        db.add(
+            MatchCache(
+                user_id=user.id,
+                matched_user_id=match.id,
+                compatibility_score=match.compatibility_score,
+                dimension_scores=[d.model_dump() for d in match.top_dimensions],
+            )
+        )
+
+    await db.commit()
+    return matches
 
 
 async def get_match_detail(

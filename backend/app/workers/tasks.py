@@ -4,8 +4,9 @@ Pipeline: decrypt → anonymize → Gemini analysis → embed → store vectors
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
+from celery import shared_task
 from app.workers.celery_app import celery_app
 from app.core.config import settings
 
@@ -170,6 +171,57 @@ async def _run_pipeline(session_id: str):
                 )
             await db.commit()
             raise exc
+
+        await db.commit()
+
+    await engine.dispose()
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=300)
+def refresh_daily_matches(self):
+    """Refresh match cache for all eligible users."""
+    try:
+        asyncio.run(_refresh_daily_matches())
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+
+async def _refresh_daily_matches():
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from sqlalchemy import select, and_
+    from app.models.psychometric import PsychometricProfile, AnalysisStatus
+    from app.models.match_cache import MatchCache
+    from app.models.user import User
+    from app.services.matching_service import compute_and_cache_matches
+
+    engine = create_async_engine(settings.async_database_url, echo=False)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with Session() as db:
+        yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+
+        result = await db.execute(
+            select(User)
+            .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
+            .where(
+                and_(
+                    PsychometricProfile.analysis_status == AnalysisStatus.complete,
+                    PsychometricProfile.identity_vector.is_not(None),
+                    (
+                        User.last_matched_at.is_(None)
+                        | (User.last_matched_at < yesterday)
+                    ),
+                )
+            )
+        )
+        users = result.scalars().all()
+
+        for user in users:
+            try:
+                await compute_and_cache_matches(user, db)
+                user.last_matched_at = datetime.now(timezone.utc)
+            except Exception:
+                pass
 
         await db.commit()
 
