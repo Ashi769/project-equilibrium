@@ -123,9 +123,10 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
 
       ws.onmessage = (evt) => {
         const msg = JSON.parse(evt.data);
-        console.log("webrtc: signal ←", msg.type);
+        console.log("webrtc: signal ←", msg.type, msg);
 
         if (msg.type === "peer-joined") {
+          console.log("webrtc: peer joined, role=", msg.role);
           if (msg.role === "offerer") {
             handleMessage(async () => {
               console.log("webrtc: I'm the offerer, creating offer");
@@ -184,7 +185,9 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         }
       };
 
-      ws.onopen = () => console.log("webrtc: signaling connected");
+      ws.onopen = () => {
+        console.log("webrtc: signaling connected, waiting for peer...");
+      };
       ws.onerror = (e) => console.error("webrtc: signaling error", e);
       ws.onclose = (e) => console.log("webrtc: signaling closed", e.code, e.reason);
     }
