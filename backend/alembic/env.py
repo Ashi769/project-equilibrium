@@ -56,11 +56,36 @@ async def run_async_migrations() -> None:
 
     async with connectable.connect() as conn:
         await conn.execute(sa.text("COMMIT"))
-        await conn.execute(
+
+        result = await conn.execute(
             sa.text(
-                "DO $$ BEGIN CREATE EXTENSION IF NOT EXISTS vector; EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+                "SELECT 1 FROM information_schema.table_constraints WHERE table_name='users' AND constraint_type='PRIMARY KEY'"
             )
         )
+        if not result.fetchone():
+            await conn.execute(sa.text("ALTER TABLE users ADD PRIMARY KEY (id)"))
+
+        result = await conn.execute(
+            sa.text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='matches' AND column_name='matched_user_id'"
+            )
+        )
+        if not result.fetchone():
+            has_user_a = await conn.execute(
+                sa.text(
+                    "SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='user_a_id'"
+                )
+            )
+            if has_user_a.fetchone():
+                await conn.execute(
+                    sa.text("ALTER TABLE matches RENAME COLUMN user_a_id TO user_id")
+                )
+                await conn.execute(
+                    sa.text(
+                        "ALTER TABLE matches RENAME COLUMN user_b_id TO matched_user_id"
+                    )
+                )
+
         await conn.commit()
 
     async with connectable.connect() as connection:
