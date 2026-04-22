@@ -90,20 +90,23 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
       }
 
 pc.ontrack = (e) => {
-        console.log("webrtc: ontrack fired", e.track.kind, e.streams);
+        console.log("webrtc: ontrack fired", e.track.kind, "enabled:", e.track.enabled, "readyState:", e.track.readyState);
         if (remoteVideoRef.current) {
           const stream = e.streams[0];
+          console.log("webrtc: stream tracks:", stream.getTracks().map(t => ({kind: t.kind, enabled: t.enabled, remote: t.remote})));
           remoteVideoRef.current.srcObject = stream;
+          
+          // Force video to render
+          remoteVideoRef.current.style.display = "block";
+          remoteVideoRef.current.style.opacity = "1";
+          remoteVideoRef.current.style.zIndex = "1";
+          
           remoteVideoRef.current.play().then(() => {
-            console.log("webrtc: video playing");
+            console.log("webrtc: video playing, width:", remoteVideoRef.current?.videoWidth, "height:", remoteVideoRef.current?.videoHeight);
           }).catch(e => {
             console.error("webrtc: play failed", e);
-            // Fallback: try with muted
             remoteVideoRef.current.muted = true;
             remoteVideoRef.current.play().catch(console.error);
-          });
-          stream.getTracks().forEach(track => {
-            console.log("webrtc: track", track.kind, "enabled:", track.enabled, "readyState:", track.readyState);
           });
           setConnected(true);
         }
@@ -114,12 +117,14 @@ pc.oniceconnectionstatechange = () => {
         console.log("webrtc: ICE state →", state);
         if (state === "connected" || state === "completed") {
           setConnected(true);
+          console.log("webrtc: ICE connected, video should flow");
         }
         if (state === "disconnected") {
-          console.log("webrtc: ICE disconnected, refreshing candidates...");
+          console.log("webrtc: ICE disconnected, refreshing...");
           pc.createOffer({ iceRestart: true }).then(offer => {
             pc.setLocalDescription(offer);
             ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
+            console.log("webrtc: sent refresh offer");
           }).catch(e => console.error("webrtc: refresh offer failed:", e));
         }
         if (state === "failed") {
