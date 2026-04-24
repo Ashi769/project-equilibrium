@@ -41,6 +41,7 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const iceCandidateBuffer = useRef<RTCIceCandidateInit[]>([]);
+  const preWsCandidates = useRef<RTCIceCandidateInit[]>([]);
   const hasRemoteDesc = useRef(false);
   const msgQueue = useRef<Promise<void>>(Promise.resolve());
   const disposed = useRef(false);
@@ -121,15 +122,19 @@ pc.oniceconnectionstatechange = () => {
         }
         if (state === "disconnected") {
           console.log("webrtc: ICE disconnected, refreshing...");
-          pc.createOffer({ iceRestart: true }).then(offer => {
-            pc.setLocalDescription(offer);
+          pc.createOffer({ iceRestart: true }).then(async offer => {
+            await pc.setLocalDescription(offer);
             ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
             console.log("webrtc: sent refresh offer");
           }).catch(e => console.error("webrtc: refresh offer failed:", e));
         }
         if (state === "failed") {
           console.log("webrtc: ICE failed, restarting...");
-          pc.restartIce();
+          pc.createOffer({ iceRestart: true }).then(async offer => {
+            await pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
+            console.log("webrtc: sent ICE restart offer");
+          }).catch(e => console.error("webrtc: ICE restart failed:", e));
         }
       };
 
@@ -147,8 +152,12 @@ pc.oniceconnectionstatechange = () => {
       wsRef.current = ws;
 
       pc.onicecandidate = (e) => {
-        if (e.candidate && ws.readyState === WebSocket.OPEN) {
+        if (!e.candidate) return;
+        if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "ice-candidate", data: e.candidate.toJSON() }));
+        } else {
+          // WS not open yet — buffer and flush on open
+          preWsCandidates.current.push(e.candidate.toJSON());
         }
       };
 
@@ -226,6 +235,9 @@ pc.oniceconnectionstatechange = () => {
 
       ws.onopen = () => {
         console.log("webrtc: signaling connected, waiting for peer...");
+        for (const c of preWsCandidates.current.splice(0)) {
+          ws.send(JSON.stringify({ type: "ice-candidate", data: c }));
+        }
       };
       ws.onerror = (e) => console.error("webrtc: signaling error", e);
       ws.onclose = (e) => console.log("webrtc: signaling closed", e.code, e.reason);
@@ -248,6 +260,7 @@ pc.oniceconnectionstatechange = () => {
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
       hasRemoteDesc.current = false;
       iceCandidateBuffer.current = [];
+      preWsCandidates.current = [];
       msgQueue.current = Promise.resolve();
     };
   }, [active, meetingId, token]);
