@@ -36,6 +36,8 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const [connected, setConnected] = useState(false);
+  const [audioMuted, setAudioMuted] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -105,10 +107,12 @@ pc.ontrack = (e) => {
           remoteVideoRef.current.play().then(() => {
             console.log("webrtc: video playing, width:", remoteVideoRef.current?.videoWidth, "height:", remoteVideoRef.current?.videoHeight);
           }).catch(e => {
-            console.error("webrtc: play failed", e);
+            console.error("webrtc: play failed, retrying muted", e);
             if (remoteVideoRef.current) {
               remoteVideoRef.current.muted = true;
-              remoteVideoRef.current.play().catch(console.error);
+              remoteVideoRef.current.play().then(() => {
+                setAudioMuted(true);
+              }).catch(console.error);
             }
           });
           setConnected(true);
@@ -274,7 +278,20 @@ pc.oniceconnectionstatechange = () => {
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
   }
 
-  return { localVideoRef, remoteVideoRef, connected, dispose };
+  function unmute() {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.muted = false;
+      setAudioMuted(false);
+    }
+  }
+
+  function toggleMic() {
+    if (!streamRef.current) return;
+    streamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
+    setMicMuted(m => !m);
+  }
+
+  return { localVideoRef, remoteVideoRef, connected, audioMuted, unmute, micMuted, toggleMic, dispose };
 }
 
 export default function MeetPage() {
@@ -294,7 +311,7 @@ export default function MeetPage() {
   const [promptIndex, setPromptIndex] = useState(0);
   const feedRef = useRef<HTMLDivElement>(null);
 
-  const { localVideoRef, remoteVideoRef, connected, dispose } = useWebRTC(meetingId, token, callActive);
+  const { localVideoRef, remoteVideoRef, connected, audioMuted, unmute, micMuted, toggleMic, dispose } = useWebRTC(meetingId, token, callActive);
 
   // Timer
   useEffect(() => {
@@ -404,8 +421,40 @@ export default function MeetPage() {
         </span>
       </div>
 
-      {/* End Session — bottom center */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
+
+      {/* Bottom controls */}
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3">
+        {/* Mic toggle */}
+        <button
+          onClick={toggleMic}
+          title={micMuted ? "Unmute mic" : "Mute mic"}
+          className="w-11 h-11 flex items-center justify-center transition-colors"
+          style={{
+            border: `1px solid ${micMuted ? "#ef4444" : "var(--border)"}`,
+            background: micMuted ? "rgba(239,68,68,0.15)" : "rgba(10,10,10,0.85)",
+            backdropFilter: "blur(8px)",
+            color: micMuted ? "#ef4444" : "var(--muted)",
+          }}
+        >
+          {micMuted ? (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="1" y1="1" x2="23" y2="23"/>
+              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          )}
+        </button>
+
+        {/* End Session */}
         <button
           onClick={() => { setCallEnded(true); dispose(); }}
           className="px-6 py-3 text-xs tracking-[0.1em] uppercase font-medium transition-colors"
@@ -430,6 +479,26 @@ export default function MeetPage() {
           Stream: {remoteVideoRef.current?.srcObject ? "attached" : "none"} |
           Tracks: {(remoteVideoRef.current?.srcObject as MediaStream | null)?.getTracks()?.length || 0}
         </div>
+
+        {/* Autoplay audio blocked — tap anywhere on video to enable */}
+        {audioMuted && connected && (
+          <button
+            onClick={unmute}
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 w-full"
+            style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(2px)", border: "none", cursor: "pointer" }}
+          >
+            <div className="w-14 h-14 flex items-center justify-center" style={{ border: "1px solid var(--accent)", borderRadius: "50%" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="1" y1="1" x2="23" y2="23"/>
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            </div>
+            <p className="text-xs tracking-[0.2em] uppercase" style={{ color: "var(--accent)" }}>Tap to enable audio</p>
+          </button>
+        )}
 
         {!connected && (
           <div className="absolute inset-0 flex items-center justify-center" style={{ background: "#0f0e0c" }}>
