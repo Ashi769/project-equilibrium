@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -44,6 +44,7 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
   const iceCandidateBuffer = useRef<RTCIceCandidateInit[]>([]);
   const preWsCandidates = useRef<RTCIceCandidateInit[]>([]);
   const hasRemoteDesc = useRef(false);
+  const roleRef = useRef<"offerer" | "answerer" | null>(null);
   const msgQueue = useRef<Promise<void>>(Promise.resolve());
   const disposed = useRef(false);
 
@@ -55,17 +56,22 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
     let ws: WebSocket;
 
     async function init() {
-      // 1. Get media
+      // 1. Get media — try combined first, then each track separately
       let stream: MediaStream | null = null;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       } catch (e) {
-        console.warn("webrtc: camera failed, trying audio-only", e);
+        console.warn("webrtc: combined getUserMedia failed, trying separately", e);
+        const tracks: MediaStreamTrack[] = [];
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
-        } catch (e2) {
-          console.error("webrtc: no media devices available", e2);
-        }
+          const vs = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          tracks.push(...vs.getTracks());
+        } catch (ve) { console.warn("webrtc: video unavailable", ve); }
+        try {
+          const as = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+          tracks.push(...as.getTracks());
+        } catch (ae) { console.warn("webrtc: audio unavailable", ae); }
+        if (tracks.length > 0) stream = new MediaStream(tracks);
       }
       if (disposed.current) { stream?.getTracks().forEach(t => t.stop()); return; }
 
@@ -81,68 +87,58 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         iceCandidatePoolSize: 10,
       });
       
-      // Connection stability
-      pc.connectionState === "new" && console.log("webrtc: connection initialized");
       pcRef.current = pc;
 
+      // Use addTransceiver to guarantee sendrecv in the SDP for both directions.
+      // addTrack alone can produce recvonly if the remote has no matching track.
+      const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
+      const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
       if (stream) {
-        for (const track of stream.getTracks()) {
-          pc.addTrack(track, stream);
-        }
+        const audioTrack = stream.getAudioTracks()[0];
+        const videoTrack = stream.getVideoTracks()[0];
+        if (audioTrack) audioTransceiver.sender.replaceTrack(audioTrack);
+        if (videoTrack) videoTransceiver.sender.replaceTrack(videoTrack);
       }
 
 pc.ontrack = (e) => {
-        console.log("webrtc: ontrack fired", e.track.kind, "enabled:", e.track.enabled, "readyState:", e.track.readyState);
-        if (remoteVideoRef.current) {
-          const stream = e.streams[0];
-          console.log("webrtc: stream tracks:", stream.getTracks().map(t => ({kind: t.kind, enabled: t.enabled})));
-          remoteVideoRef.current.srcObject = stream;
-          
-          // Force video to render
-          remoteVideoRef.current.style.display = "block";
-          remoteVideoRef.current.style.opacity = "1";
-          remoteVideoRef.current.style.zIndex = "1";
-          
-          remoteVideoRef.current.play().catch(e => {
-            console.error("webrtc: play failed", e);
-          });
-          setConnected(true);
+        const el = remoteVideoRef.current;
+        if (!el || !e.streams[0]) return;
+        // Only attach + play once — ontrack fires per track (video then audio)
+        if (el.srcObject !== e.streams[0]) {
+          el.srcObject = e.streams[0];
+          el.play().catch(err => console.error("webrtc: play failed", err));
         }
+        setConnected(true);
       };
 
 pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
         console.log("webrtc: ICE state →", state);
+
         if (state === "connected" || state === "completed") {
           setConnected(true);
-          console.log("webrtc: ICE connected, video should flow");
         }
+
+        // "disconnected" is transient — the browser will attempt self-recovery.
+        // Mark the UI as interrupted but do not restart ICE here; that would
+        // race with the peer doing the same thing (glare).
         if (state === "disconnected") {
-          console.log("webrtc: ICE disconnected, refreshing...");
-          pc.createOffer({ iceRestart: true }).then(async offer => {
-            await pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
-            console.log("webrtc: sent refresh offer");
-          }).catch(e => console.error("webrtc: refresh offer failed:", e));
+          setConnected(false);
         }
+
+        // "failed" is terminal — recovery requires a new offer.
+        // Only the offerer restarts to prevent both sides creating offers
+        // simultaneously (glare). The answerer waits for the new offer.
         if (state === "failed") {
-          console.log("webrtc: ICE failed, restarting...");
-          pc.createOffer({ iceRestart: true }).then(async offer => {
-            await pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
-            console.log("webrtc: sent ICE restart offer");
-          }).catch(e => console.error("webrtc: ICE restart failed:", e));
+          setConnected(false);
+          if (roleRef.current === "offerer") {
+            pc.createOffer({ iceRestart: true }).then(async offer => {
+              await pc.setLocalDescription(offer);
+              ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
+            }).catch(e => console.error("webrtc: ICE restart failed:", e));
+          }
         }
       };
-
-      // Timeout for peer connection
-      setTimeout(() => {
-        if (pc.iceConnectionState !== "connected" && pc.iceConnectionState !== "completed") {
-          console.log("webrtc: timeout - ICE state:", pc.iceConnectionState);
-        } else {
-          console.log("webrtc: connection established, ICE state:", pc.iceConnectionState);
-        }
-      }, 30000);
 
       // 3. Open signaling WebSocket
       ws = new WebSocket(`${WS_URL}/api/v1/signal/${meetingId}?token=${token}`);
@@ -168,20 +164,15 @@ pc.oniceconnectionstatechange = () => {
 
       ws.onmessage = (evt) => {
         const msg = JSON.parse(evt.data);
-        console.log("webrtc: signal ←", msg.type, msg);
 
         if (msg.type === "peer-joined") {
-          console.log("webrtc: peer joined, role=", msg.role);
+          roleRef.current = msg.role;
           if (msg.role === "offerer") {
             handleMessage(async () => {
-              console.log("webrtc: I'm the offerer, creating offer");
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
               ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
-              console.log("webrtc: offer sent");
             });
-          } else {
-            console.log("webrtc: I'm the answerer, waiting for offer");
           }
           return;
         }
@@ -193,15 +184,11 @@ pc.oniceconnectionstatechange = () => {
 
         if (msg.type === "offer") {
           handleMessage(async () => {
-            console.log("webrtc: received offer, creating answer");
             await pc.setRemoteDescription(new RTCSessionDescription(msg.data));
             hasRemoteDesc.current = true;
-
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             ws.send(JSON.stringify({ type: "answer", data: pc.localDescription!.toJSON() }));
-            console.log("webrtc: answer sent");
-
             await drainIceBuffer(pc);
           });
           return;
@@ -209,10 +196,8 @@ pc.oniceconnectionstatechange = () => {
 
         if (msg.type === "answer") {
           handleMessage(async () => {
-            console.log("webrtc: received answer");
             await pc.setRemoteDescription(new RTCSessionDescription(msg.data));
             hasRemoteDesc.current = true;
-
             await drainIceBuffer(pc);
           });
           return;
@@ -221,7 +206,6 @@ pc.oniceconnectionstatechange = () => {
         if (msg.type === "ice-candidate" && msg.data) {
           handleMessage(async () => {
             if (!hasRemoteDesc.current) {
-              console.log("webrtc: buffering ICE candidate (no remote desc yet)");
               iceCandidateBuffer.current.push(msg.data);
             } else {
               await pc.addIceCandidate(new RTCIceCandidate(msg.data));
@@ -243,7 +227,6 @@ pc.oniceconnectionstatechange = () => {
     async function drainIceBuffer(pc: RTCPeerConnection) {
       const buffered = iceCandidateBuffer.current.splice(0);
       for (const c of buffered) {
-        console.log("webrtc: applying buffered ICE candidate");
         await pc.addIceCandidate(new RTCIceCandidate(c));
       }
     }
@@ -256,24 +239,25 @@ pc.oniceconnectionstatechange = () => {
       if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
       hasRemoteDesc.current = false;
+      roleRef.current = null;
       iceCandidateBuffer.current = [];
       preWsCandidates.current = [];
       msgQueue.current = Promise.resolve();
     };
   }, [active, meetingId, token]);
 
-  function dispose() {
+  const dispose = useCallback(() => {
     disposed.current = true;
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
     if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
-  }
+  }, []);
 
-  function toggleMic() {
+  const toggleMic = useCallback(() => {
     if (!streamRef.current) return;
     streamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
     setMicMuted(m => !m);
-  }
+  }, []);
 
   return { localVideoRef, remoteVideoRef, connected, micMuted, toggleMic, dispose };
 }
@@ -467,11 +451,6 @@ export default function MeetPage() {
           className="absolute inset-0 w-full h-full object-cover"
           style={{ width: "100%", height: "100%" }}
         />
-        <div id="remote-video-debug" style={{ position: "absolute", top: 0, left: 0, color: "white", zIndex: 100, fontSize: "12px" }}>
-          Stream: {remoteVideoRef.current?.srcObject ? "attached" : "none"} |
-          Tracks: {(remoteVideoRef.current?.srcObject as MediaStream | null)?.getTracks()?.length || 0}
-        </div>
-
         {!connected && (
           <div className="absolute inset-0 flex items-center justify-center" style={{ background: "#0f0e0c" }}>
             <div className="text-center">
