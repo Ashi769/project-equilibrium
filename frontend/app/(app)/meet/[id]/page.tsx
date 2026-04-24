@@ -106,8 +106,10 @@ pc.ontrack = (e) => {
             console.log("webrtc: video playing, width:", remoteVideoRef.current?.videoWidth, "height:", remoteVideoRef.current?.videoHeight);
           }).catch(e => {
             console.error("webrtc: play failed", e);
-            remoteVideoRef.current.muted = true;
-            remoteVideoRef.current.play().catch(console.error);
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.muted = true;
+              remoteVideoRef.current.play().catch(console.error);
+            }
           });
           setConnected(true);
         }
@@ -425,8 +427,8 @@ export default function MeetPage() {
           style={{ width: "100%", height: "100%" }}
         />
         <div id="remote-video-debug" style={{ position: "absolute", top: 0, left: 0, color: "white", zIndex: 100, fontSize: "12px" }}>
-          Stream: {remoteVideoRef.current?.srcObject ? "attached" : "none"} | 
-          Tracks: {remoteVideoRef.current?.srcObject?.getTracks()?.length || 0}
+          Stream: {remoteVideoRef.current?.srcObject ? "attached" : "none"} |
+          Tracks: {(remoteVideoRef.current?.srcObject as MediaStream | null)?.getTracks()?.length || 0}
         </div>
 
         {!connected && (
