@@ -94,7 +94,7 @@ pc.ontrack = (e) => {
         console.log("webrtc: ontrack fired", e.track.kind, "enabled:", e.track.enabled, "readyState:", e.track.readyState);
         if (remoteVideoRef.current) {
           const stream = e.streams[0];
-          console.log("webrtc: stream tracks:", stream.getTracks().map(t => ({kind: t.kind, enabled: t.enabled, remote: t.remote})));
+          console.log("webrtc: stream tracks:", stream.getTracks().map(t => ({kind: t.kind, enabled: t.enabled})));
           remoteVideoRef.current.srcObject = stream;
           
           // Force video to render
