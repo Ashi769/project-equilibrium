@@ -89,10 +89,13 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
       
       pcRef.current = pc;
 
-      // Use addTransceiver to guarantee sendrecv in the SDP for both directions.
-      // addTrack alone can produce recvonly if the remote has no matching track.
-      const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
-      const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
+      // addTransceiver guarantees sendrecv in the SDP so both sides can send
+      // and receive regardless of whether the remote has a local track.
+      // streams: [groupStream] carries the MSID in the SDP so the remote
+      // side receives e.streams[0] populated in ontrack.
+      const groupStream = stream ?? new MediaStream();
+      const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv", streams: [groupStream] });
+      const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv", streams: [groupStream] });
       if (stream) {
         const audioTrack = stream.getAudioTracks()[0];
         const videoTrack = stream.getVideoTracks()[0];
@@ -102,11 +105,21 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
 
 pc.ontrack = (e) => {
         const el = remoteVideoRef.current;
-        if (!el || !e.streams[0]) return;
-        // Only attach + play once — ontrack fires per track (video then audio)
-        if (el.srcObject !== e.streams[0]) {
-          el.srcObject = e.streams[0];
-          el.play().catch(err => console.error("webrtc: play failed", err));
+        if (!el) return;
+        if (e.streams[0]) {
+          // Normal path: sender associated a stream, use it directly.
+          if (el.srcObject !== e.streams[0]) {
+            el.srcObject = e.streams[0];
+            el.play().catch(err => console.error("webrtc: play failed", err));
+          }
+        } else {
+          // Fallback: no associated stream, accumulate tracks manually.
+          const ms = el.srcObject instanceof MediaStream ? el.srcObject : new MediaStream();
+          if (!ms.getTracks().includes(e.track)) ms.addTrack(e.track);
+          if (el.srcObject !== ms) {
+            el.srcObject = ms;
+            el.play().catch(err => console.error("webrtc: play failed", err));
+          }
         }
         setConnected(true);
       };
