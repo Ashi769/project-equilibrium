@@ -89,18 +89,25 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
       
       pcRef.current = pc;
 
-      // addTransceiver guarantees sendrecv in the SDP so both sides can send
-      // and receive regardless of whether the remote has a local track.
-      // streams: [groupStream] carries the MSID in the SDP so the remote
-      // side receives e.streams[0] populated in ontrack.
-      const groupStream = stream ?? new MediaStream();
-      const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv", streams: [groupStream] });
-      const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv", streams: [groupStream] });
-      if (stream) {
-        const audioTrack = stream.getAudioTracks()[0];
-        const videoTrack = stream.getVideoTracks()[0];
-        if (audioTrack) audioTransceiver.sender.replaceTrack(audioTrack);
-        if (videoTrack) videoTransceiver.sender.replaceTrack(videoTrack);
+      // Always add transceivers for both audio and video so the SDP always
+      // has both m-lines. This lets either peer receive the other's media
+      // even if one side's camera or mic is unavailable.
+      // Passing the MediaStreamTrack directly as the first arg (not replaceTrack)
+      // correctly sets the sender track AND the MSID in the SDP.
+      const audioTrack = stream?.getAudioTracks()[0] ?? null;
+      const videoTrack = stream?.getVideoTracks()[0] ?? null;
+      const streams = stream ? [stream] : [];
+
+      if (audioTrack) {
+        pc.addTransceiver(audioTrack, { direction: "sendrecv", streams });
+      } else {
+        pc.addTransceiver("audio", { direction: "sendrecv" });
+      }
+
+      if (videoTrack) {
+        pc.addTransceiver(videoTrack, { direction: "sendrecv", streams });
+      } else {
+        pc.addTransceiver("video", { direction: "sendrecv" });
       }
 
 pc.ontrack = (e) => {
