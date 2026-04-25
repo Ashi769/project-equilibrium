@@ -13,7 +13,7 @@ interface MeetingResponse {
   match_id: string;
 }
 
-const links = [
+const BASE_LINKS = [
   { href: "/selection", label: "Selection" },
   { href: "/meetings",  label: "Meetings"  },
   { href: "/profile",   label: "Profile"   },
@@ -24,6 +24,10 @@ export function NavLinks() {
   const { data: session } = useSession();
   const token  = session?.accessToken as string | undefined;
   const userId = session?.userId    as string | undefined;
+
+  const links = session?.gender === "woman"
+    ? [...BASE_LINKS, { href: "/invitations", label: "Invitations" }]
+    : BASE_LINKS;
 
   const { data: meetings } = useQuery({
     queryKey: ["meetings-nav"],
@@ -37,7 +41,7 @@ export function NavLinks() {
 
   return (
     <nav className="flex items-center gap-7">
-      {links.map(({ href, label }) => {
+      {links.map(({ href, label }: { href: string; label: string }) => {
         const active    = pathname.startsWith(href);
         const showBadge = href === "/meetings" && pendingCount > 0;
         return (
