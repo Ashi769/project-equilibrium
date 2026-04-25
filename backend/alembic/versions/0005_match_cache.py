@@ -19,32 +19,10 @@ def upgrade() -> None:
         "users",
         sa.Column("last_matched_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.create_table(
-        "matches",
-        sa.Column("id", sa.String(), primary_key=True),
-        sa.Column(
-            "user_id",
-            sa.String(),
-            sa.ForeignKey("users.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column(
-            "matched_user_id",
-            sa.String(),
-            sa.ForeignKey("users.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("compatibility_score", sa.Float(), nullable=False),
-        sa.Column("dimension_scores", sa.JSON(), nullable=False),
-        sa.Column("computed_at", sa.DateTime(timezone=True), nullable=False),
-    )
+    # matches table already exists from 0001_initial_schema; just add the missing index
     op.create_index("ix_matches_user_id", "matches", ["user_id"])
-    op.create_unique_constraint(
-        "uq_matches_pair", "matches", ["user_id", "matched_user_id"]
-    )
 
 
 def downgrade() -> None:
     op.drop_index("ix_matches_user_id", "matches")
-    op.drop_table("matches")
     op.drop_column("users", "last_matched_at")
