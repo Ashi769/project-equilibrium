@@ -90,11 +90,8 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
 
       pcRef.current = pc;
 
-      // Pre-create a single remote MediaStream and wire it to the video element
-      // immediately. All incoming remote tracks are added to this one stream so
-      // there is never a situation where srcObject is swapped between a fallback
-      // stream and an e.streams[0] stream, which would silently drop the first
-      // set of tracks (root cause of one-sided audio / no video for late joiner).
+      // Single remote MediaStream that accumulates all incoming tracks.
+      // Set srcObject once here so the <video> element is always wired to it.
       const remoteStream = new MediaStream();
       remoteStreamRef.current = remoteStream;
       const remoteEl = remoteVideoRef.current;
@@ -102,30 +99,26 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         remoteEl.srcObject = remoteStream;
       }
 
-      // Always add transceivers for both audio and video so the SDP always
-      // has both m-lines. This lets either peer receive the other's media
-      // even if one side's camera or mic is unavailable.
-      // Passing the MediaStreamTrack directly as the first arg (not replaceTrack)
-      // correctly sets the sender track AND the MSID in the SDP.
-      const audioTrack = stream?.getAudioTracks()[0] ?? null;
-      const videoTrack = stream?.getVideoTracks()[0] ?? null;
-      const streams = stream ? [stream] : [];
-
-      if (audioTrack) {
-        pc.addTransceiver(audioTrack, { direction: "sendrecv", streams });
-      } else {
-        pc.addTransceiver("audio", { direction: "sendrecv" });
-      }
-
-      if (videoTrack) {
-        pc.addTransceiver(videoTrack, { direction: "sendrecv", streams });
-      } else {
-        pc.addTransceiver("video", { direction: "sendrecv" });
-      }
+      // ── NOTE: we do NOT add any transceivers here. ──────────────────────────
+      // Transceivers must be added at the right moment for each role:
+      //
+      //  • OFFERER  – adds transceivers right before createOffer() so its tracks
+      //               appear in the SDP it sends.
+      //
+      //  • ANSWERER – calls setRemoteDescription(offer) first (the browser then
+      //               creates recvonly transceivers for each m-line), and only
+      //               AFTER that calls addTrack() to upgrade those transceivers
+      //               to sendrecv and include its own tracks in the answer.
+      //
+      // Pre-creating transceivers on BOTH sides before knowing the role is the
+      // root cause of the bugs: when the answerer already has sendrecv
+      // transceivers and then calls setRemoteDescription(offer), browsers may
+      // create ADDITIONAL recvonly transceivers for the offer's m-lines. The
+      // answer then goes out as recvonly — the offerer receives nothing back,
+      // ontrack never fires on their side, and they see/hear nothing.
+      // ────────────────────────────────────────────────────────────────────────
 
       pc.ontrack = (e) => {
-        // Add every incoming remote track to our single pre-allocated stream.
-        // Avoid duplicates (e.g. renegotiation re-fires ontrack for existing tracks).
         if (!remoteStream.getTracks().includes(e.track)) {
           remoteStream.addTrack(e.track);
         }
@@ -134,10 +127,6 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
           if (el.srcObject !== remoteStream) {
             el.srcObject = remoteStream;
           }
-          // Call play() each time a track arrives: the first call starts playback,
-          // subsequent calls are no-ops on an already-playing element. This also
-          // handles the case where the element was not yet playing (e.g. the very
-          // first ontrack fired before ICE connected and play() had not been called).
           el.play().catch(() => {});
         }
         setConnected(true);
@@ -149,24 +138,16 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
 
         if (state === "connected" || state === "completed") {
           setConnected(true);
-          // Retry play() in case the initial call happened before ICE connected
-          // and the element's internal pipeline stalled waiting for media data.
           const el = remoteVideoRef.current;
           if (el && el.paused) {
             el.play().catch(() => {});
           }
         }
 
-        // "disconnected" is transient — the browser will attempt self-recovery.
-        // Mark the UI as interrupted but do not restart ICE here; that would
-        // race with the peer doing the same thing (glare).
         if (state === "disconnected") {
           setConnected(false);
         }
 
-        // "failed" is terminal — recovery requires a new offer.
-        // Only the offerer restarts to prevent both sides creating offers
-        // simultaneously (glare). The answerer waits for the new offer.
         if (state === "failed") {
           setConnected(false);
           if (roleRef.current === "offerer") {
@@ -187,17 +168,41 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "ice-candidate", data: e.candidate.toJSON() }));
         } else {
-          // WS not open yet — buffer and flush on open
           preWsCandidates.current.push(e.candidate.toJSON());
         }
       };
 
-      // Serialize all message handling to avoid race conditions.
-      // Each message handler awaits the previous one before running.
       function handleMessage(handler: () => Promise<void>) {
         msgQueue.current = msgQueue.current.then(handler).catch((err) => {
           console.error("webrtc: message handler error", err);
         });
+      }
+
+      // Helper: add local tracks to the PC. Safe to call multiple times (ICE
+      // restart re-enters the offer/answer handlers) — addTrack throws if the
+      // track is already registered, so we guard with getSenders().
+      function addLocalTracks() {
+        const existingTracks = new Set(pc.getSenders().map(s => s.track));
+        const audioTrack = stream?.getAudioTracks()[0] ?? null;
+        const videoTrack = stream?.getVideoTracks()[0] ?? null;
+        if (audioTrack && !existingTracks.has(audioTrack)) {
+          stream ? pc.addTrack(audioTrack, stream) : pc.addTrack(audioTrack);
+        }
+        if (videoTrack && !existingTracks.has(videoTrack)) {
+          stream ? pc.addTrack(videoTrack, stream) : pc.addTrack(videoTrack);
+        }
+        // Ensure recvonly m-lines exist even when a track is missing (mic/cam
+        // unavailable). This keeps both m-lines in every offer/answer so the
+        // SDP structure never changes mid-call.
+        const kinds: RTCRtpCodecParameters["mimeType"][] = [];
+        if (!audioTrack) kinds.push("audio" as RTCRtpCodecParameters["mimeType"]);
+        if (!videoTrack) kinds.push("video" as RTCRtpCodecParameters["mimeType"]);
+        const existingKinds = new Set(pc.getTransceivers().map(t => t.receiver.track.kind));
+        for (const kind of kinds) {
+          if (!existingKinds.has(kind)) {
+            pc.addTransceiver(kind as "audio" | "video", { direction: "recvonly" });
+          }
+        }
       }
 
       ws.onmessage = (evt) => {
@@ -207,6 +212,8 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
           roleRef.current = msg.role;
           if (msg.role === "offerer") {
             handleMessage(async () => {
+              // OFFERER: add tracks first so the offer SDP includes our streams.
+              addLocalTracks();
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
               ws.send(JSON.stringify({ type: "offer", data: pc.localDescription!.toJSON() }));
@@ -222,8 +229,19 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
 
         if (msg.type === "offer") {
           handleMessage(async () => {
+            // ANSWERER step 1: process the remote offer. The browser creates
+            // recvonly transceivers for each m-line in the offer.
             await pc.setRemoteDescription(new RTCSessionDescription(msg.data));
             hasRemoteDesc.current = true;
+
+            // ANSWERER step 2: add our tracks NOW. addTrack() finds the recvonly
+            // transceivers that setRemoteDescription just created and upgrades
+            // them to sendrecv, so our tracks appear in the answer. Doing this
+            // before setRemoteDescription would leave pre-existing sendrecv
+            // transceivers that the browser might not match with the offer's
+            // m-lines, producing a recvonly answer instead.
+            addLocalTracks();
+
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             ws.send(JSON.stringify({ type: "answer", data: pc.localDescription!.toJSON() }));
