@@ -41,6 +41,7 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
   const iceCandidateBuffer = useRef<RTCIceCandidateInit[]>([]);
   const preWsCandidates = useRef<RTCIceCandidateInit[]>([]);
   const hasRemoteDesc = useRef(false);
@@ -81,13 +82,25 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
       }
 
       // 2. Create peer connection
-      pc = new RTCPeerConnection({ 
+      pc = new RTCPeerConnection({
         iceServers: ICE_SERVERS,
         iceTransportPolicy: "all",
         iceCandidatePoolSize: 10,
       });
-      
+
       pcRef.current = pc;
+
+      // Pre-create a single remote MediaStream and wire it to the video element
+      // immediately. All incoming remote tracks are added to this one stream so
+      // there is never a situation where srcObject is swapped between a fallback
+      // stream and an e.streams[0] stream, which would silently drop the first
+      // set of tracks (root cause of one-sided audio / no video for late joiner).
+      const remoteStream = new MediaStream();
+      remoteStreamRef.current = remoteStream;
+      const remoteEl = remoteVideoRef.current;
+      if (remoteEl) {
+        remoteEl.srcObject = remoteStream;
+      }
 
       // Always add transceivers for both audio and video so the SDP always
       // has both m-lines. This lets either peer receive the other's media
@@ -110,33 +123,38 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         pc.addTransceiver("video", { direction: "sendrecv" });
       }
 
-pc.ontrack = (e) => {
+      pc.ontrack = (e) => {
+        // Add every incoming remote track to our single pre-allocated stream.
+        // Avoid duplicates (e.g. renegotiation re-fires ontrack for existing tracks).
+        if (!remoteStream.getTracks().includes(e.track)) {
+          remoteStream.addTrack(e.track);
+        }
         const el = remoteVideoRef.current;
-        if (!el) return;
-        if (e.streams[0]) {
-          // Normal path: sender associated a stream, use it directly.
-          if (el.srcObject !== e.streams[0]) {
-            el.srcObject = e.streams[0];
-            el.play().catch(err => console.error("webrtc: play failed", err));
+        if (el) {
+          if (el.srcObject !== remoteStream) {
+            el.srcObject = remoteStream;
           }
-        } else {
-          // Fallback: no associated stream, accumulate tracks manually.
-          const ms = el.srcObject instanceof MediaStream ? el.srcObject : new MediaStream();
-          if (!ms.getTracks().includes(e.track)) ms.addTrack(e.track);
-          if (el.srcObject !== ms) {
-            el.srcObject = ms;
-            el.play().catch(err => console.error("webrtc: play failed", err));
-          }
+          // Call play() each time a track arrives: the first call starts playback,
+          // subsequent calls are no-ops on an already-playing element. This also
+          // handles the case where the element was not yet playing (e.g. the very
+          // first ontrack fired before ICE connected and play() had not been called).
+          el.play().catch(() => {});
         }
         setConnected(true);
       };
 
-pc.oniceconnectionstatechange = () => {
+      pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
         console.log("webrtc: ICE state →", state);
 
         if (state === "connected" || state === "completed") {
           setConnected(true);
+          // Retry play() in case the initial call happened before ICE connected
+          // and the element's internal pipeline stalled waiting for media data.
+          const el = remoteVideoRef.current;
+          if (el && el.paused) {
+            el.play().catch(() => {});
+          }
         }
 
         // "disconnected" is transient — the browser will attempt self-recovery.
@@ -258,6 +276,8 @@ pc.oniceconnectionstatechange = () => {
       if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
       if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
       if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+      if (remoteStreamRef.current) { remoteStreamRef.current = null; }
+      if (remoteVideoRef.current) { remoteVideoRef.current.srcObject = null; }
       hasRemoteDesc.current = false;
       roleRef.current = null;
       iceCandidateBuffer.current = [];
@@ -271,7 +291,9 @@ pc.oniceconnectionstatechange = () => {
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
     if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
     if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
-  }, []);
+    if (remoteStreamRef.current) { remoteStreamRef.current = null; }
+    if (remoteVideoRef.current) { remoteVideoRef.current.srcObject = null; }
+  }, [remoteVideoRef]);
 
   const toggleMic = useCallback(() => {
     if (!streamRef.current) return;
