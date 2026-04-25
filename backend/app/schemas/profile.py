@@ -14,6 +14,8 @@ class HardFilters(BaseModel):
 
 
 class UserAttributes(BaseModel):
+    age: int | None = None
+    gender: str | None = None
     height: int | None = None
     drinking: str | None = None
     smoking: str | None = None
@@ -43,3 +45,4 @@ class ProfileResponse(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     hard_filters: HardFilters | None = None
     attributes: UserAttributes | None = None
+    invitation_token: str | None = None

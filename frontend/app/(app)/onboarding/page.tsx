@@ -14,7 +14,7 @@ export default async function OnboardingPage({
   const params = await searchParams;
   const isRetake = params.retake === "true";
 
-  const [photosRes, profileRes] = await Promise.all([
+  const [photosRes, profileRes, identityRes] = await Promise.all([
     fetch(`${API_URL}/api/v1/photos/status`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
       cache: "no-store",
@@ -23,7 +23,17 @@ export default async function OnboardingPage({
       headers: { Authorization: `Bearer ${session.accessToken}` },
       cache: "no-store",
     }),
+    fetch(`${API_URL}/api/v1/profile`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      cache: "no-store",
+    }),
   ]);
+
+  // Gender must be set before proceeding to photos
+  if (identityRes.ok) {
+    const identity = await identityRes.json();
+    if (!identity.gender) redirect("/onboarding/identity");
+  }
 
   if (!isRetake && profileRes.ok) {
     const profile = await profileRes.json();

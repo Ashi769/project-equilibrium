@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { signIn, useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,11 +17,29 @@ const schema = z.object({
 type F = z.infer<typeof schema>;
 
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const { status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { register, handleSubmit, formState: { errors } } = useForm<F>({ resolver: zodResolver(schema) });
+
+  // Persist invite code from URL so the identity step can read it after login
+  useEffect(() => {
+    const invite = searchParams.get("invite");
+    if (invite) {
+      sessionStorage.setItem("pending_invite", invite);
+      sessionStorage.setItem("pending_invite_ts", String(Date.now()));
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (status === "authenticated") {

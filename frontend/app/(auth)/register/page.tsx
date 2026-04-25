@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -15,46 +15,26 @@ const schema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
   password: z.string().min(8, "Password must be at least 8 characters"),
-  age: z.number().int().min(18, "Must be 18 or older").max(100),
-  gender: z.enum(["man", "woman", "non-binary", "other"]),
-  invitation_token: z.string().optional(),
 });
 type FormData = z.infer<typeof schema>;
 
-const wobblySelect: React.CSSProperties = {
-  height: "3rem",
-  width: "100%",
-  border: "2px solid #2d2d2d",
-  background: "#ffffff",
-  color: "#2d2d2d",
-  padding: "0 0.75rem",
-  fontSize: "1rem",
-  outline: "none",
-  fontFamily: "'Patrick Hand', system-ui, sans-serif",
-  borderRadius: "var(--radius-wobbly-sm)",
-  boxShadow: "2px 2px 0px 0px #2d2d2d",
-  appearance: "auto",
-};
-
 export default function RegisterPage() {
+  return (
+    <Suspense>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
   });
-
-  const selectedGender = watch("gender");
-
-  useEffect(() => {
-    const token = searchParams.get("invite");
-    if (token) {
-      setValue("invitation_token", token);
-      setValue("gender", "man");
-    }
-  }, [searchParams, setValue]);
 
   async function onSubmit(data: FormData) {
     setIsLoading(true);
@@ -67,7 +47,8 @@ export default function RegisterPage() {
         redirect: false,
       });
       if (result?.error) throw new Error("Sign-in failed after registration");
-      router.push("/onboarding");
+      const invite = searchParams.get("invite");
+      router.push(invite ? `/onboarding/identity?invite=${invite}` : "/onboarding/identity");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Registration failed");
     } finally {
@@ -77,7 +58,6 @@ export default function RegisterPage() {
 
   return (
     <div className="w-full max-w-sm mx-auto px-4 space-y-6 md:space-y-8">
-      {/* Brand mark */}
       <div className="text-center space-y-3">
         <div
           className="inline-flex items-center justify-center w-14 h-14 border-2 border-[#2d2d2d] mx-auto"
@@ -95,14 +75,15 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      {/* Form card */}
       <div
         className="p-5 md:p-7 space-y-4 md:space-y-5 bg-white border-2 border-[#2d2d2d] rotate-[0.5deg]"
         style={{ borderRadius: "var(--radius-wobbly)", boxShadow: "var(--shadow-hard)" }}
       >
-        {/* Google */}
         <button
-          onClick={() => signIn("google", { callbackUrl: "/onboarding" })}
+          onClick={() => {
+            const invite = searchParams.get("invite");
+            signIn("google", { callbackUrl: invite ? `/onboarding/identity?invite=${invite}` : "/onboarding/identity" });
+          }}
           className="w-full h-12 flex items-center justify-center gap-3 text-base font-medium border-2 border-[#2d2d2d] bg-[#e5e0d8] transition-all duration-75 hover:bg-[#2d5da1] hover:text-white hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
           style={{ borderRadius: "var(--radius-wobbly-btn)", boxShadow: "var(--shadow-hard-sm)" }}
         >
@@ -134,41 +115,6 @@ export default function RegisterPage() {
             <Input type="password" placeholder="8+ characters" {...register("password")} />
             {errors.password && <p className="text-sm" style={{ color: "var(--accent)" }}>{errors.password.message}</p>}
           </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Age</label>
-              <Input type="number" placeholder="25" {...register("age", { valueAsNumber: true })} />
-              {errors.age && <p className="text-sm" style={{ color: "var(--accent)" }}>{errors.age.message}</p>}
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>Gender</label>
-              <select style={wobblySelect} {...register("gender")}>
-                <option value="man">Man</option>
-                <option value="woman">Woman</option>
-                <option value="non-binary">Non-binary</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-          </div>
-
-          {selectedGender === "man" && (
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>
-                Invitation code
-              </label>
-              <Input
-                placeholder="Paste your invitation code"
-                {...register("invitation_token")}
-              />
-              <p className="text-xs" style={{ color: "var(--dim)" }}>
-                Men can only join with an invitation from a woman on the platform.
-              </p>
-              {errors.invitation_token && (
-                <p className="text-sm" style={{ color: "var(--accent)" }}>{errors.invitation_token.message}</p>
-              )}
-            </div>
-          )}
 
           {error && (
             <div

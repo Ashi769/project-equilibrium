@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -17,7 +16,6 @@ from app.core.security import (
 from app.core.config import settings
 from app.models.user import User
 from app.models.psychometric import PsychometricProfile
-from app.models.invitation import Invitation
 from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
@@ -58,39 +56,15 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
             status_code=422, detail="Password must be at least 8 characters"
         )
 
-    invitation: Invitation | None = None
-    if body.gender == "man":
-        if not body.invitation_token:
-            raise HTTPException(
-                status_code=403,
-                detail="Men must register with an invitation from a woman",
-            )
-        inv_result = await db.execute(
-            select(Invitation).where(Invitation.token == body.invitation_token)
-        )
-        invitation = inv_result.scalar_one_or_none()
-        if not invitation:
-            raise HTTPException(status_code=403, detail="Invalid invitation token")
-        if invitation.used_by is not None:
-            raise HTTPException(status_code=403, detail="Invitation has already been used")
-
     user = User(
         email=body.email,
         password_hash=hash_password(body.password),
         name=body.name,
-        age=body.age,
-        gender=body.gender,
     )
     db.add(user)
     await db.flush()
 
-    profile = PsychometricProfile(user_id=user.id)
-    db.add(profile)
-
-    if invitation is not None:
-        invitation.used_by = user.id
-        invitation.used_at = datetime.now(timezone.utc)
-
+    db.add(PsychometricProfile(user_id=user.id))
     logger.info(f"[DEBUG] Register successful for user: {user.id}, email: {user.email}")
     return _token_response(user)
 

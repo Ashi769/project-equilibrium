@@ -13,7 +13,7 @@ const loginSchema = z.object({
 type BackendTokens = {
   access_token: string;
   refresh_token: string;
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; gender: string | null };
 };
 
 async function getBackendTokens(
@@ -75,6 +75,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           name: data.user.name,
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
+          gender: data.user.gender,
         };
       },
     }),
@@ -91,7 +92,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
       return true;
     },
-    async jwt({ token, user, account, isNewUser }) {
+    async jwt({ token, user, account, trigger, session: sessionUpdate }) {
+      // Client called update({ gender }) after completing the identity step
+      if (trigger === "update" && sessionUpdate?.gender !== undefined) {
+        token.gender = sessionUpdate.gender as string | null;
+        return token;
+      }
+
       // Google OAuth - call backend /google endpoint to get backend tokens
       // NextAuth v5 doesn't give us account.id_token, but we have sub and email in token
       if (!token.accessToken && token.sub && token.email) {
@@ -104,6 +111,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           token.accessToken = data.access_token;
           token.refreshToken = data.refresh_token;
           token.userId = data.user.id;
+          token.gender = data.user.gender;
           token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
           return token;
         }
@@ -114,7 +122,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.accessToken = (user as any).accessToken;
         token.refreshToken = (user as any).refreshToken;
         token.userId = user.id;
-        token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+        token.gender = (user as any).gender ?? null;
+        token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
         return token;
       }
 
@@ -125,6 +134,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           token.accessToken = data.access_token;
           token.refreshToken = data.refresh_token;
           token.userId = data.user.id;
+          token.gender = data.user.gender;
           token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
         }
         return token;
@@ -158,6 +168,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async session({ session, token }) {
       session.accessToken = (token.accessToken as string) ?? "";
       session.userId = (token.userId as string) ?? "";
+      session.gender = (token.gender as string | null | undefined) ?? null;
       return session;
     },
   },
