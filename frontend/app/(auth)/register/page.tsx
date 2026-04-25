@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,6 +17,7 @@ const schema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
   age: z.number().int().min(18, "Must be 18 or older").max(100),
   gender: z.enum(["man", "woman", "non-binary", "other"]),
+  invitation_token: z.string().optional(),
 });
 type FormData = z.infer<typeof schema>;
 
@@ -37,12 +38,23 @@ const wobblySelect: React.CSSProperties = {
 
 export default function RegisterPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
   });
+
+  const selectedGender = watch("gender");
+
+  useEffect(() => {
+    const token = searchParams.get("invite");
+    if (token) {
+      setValue("invitation_token", token);
+      setValue("gender", "man");
+    }
+  }, [searchParams, setValue]);
 
   async function onSubmit(data: FormData) {
     setIsLoading(true);
@@ -139,6 +151,24 @@ export default function RegisterPage() {
               </select>
             </div>
           </div>
+
+          {selectedGender === "man" && (
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium block" style={{ color: "var(--ink)" }}>
+                Invitation code
+              </label>
+              <Input
+                placeholder="Paste your invitation code"
+                {...register("invitation_token")}
+              />
+              <p className="text-xs" style={{ color: "var(--dim)" }}>
+                Men can only join with an invitation from a woman on the platform.
+              </p>
+              {errors.invitation_token && (
+                <p className="text-sm" style={{ color: "var(--accent)" }}>{errors.invitation_token.message}</p>
+              )}
+            </div>
+          )}
 
           {error && (
             <div

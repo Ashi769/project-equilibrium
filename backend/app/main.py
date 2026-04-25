@@ -10,6 +10,7 @@ from app.api.v1 import (
     auth,
     debug,
     interview,
+    invitations,
     matches,
     profile,
     photos,
@@ -46,6 +47,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(debug.router, prefix="/api/v1")
+app.include_router(invitations.router, prefix="/api/v1")
 app.include_router(interview.router, prefix="/api/v1")
 app.include_router(matches.router, prefix="/api/v1")
 app.include_router(profile.router, prefix="/api/v1")

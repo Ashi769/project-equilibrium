@@ -7,6 +7,7 @@ class RegisterRequest(BaseModel):
     password: str
     age: int | None = None
     gender: str | None = None
+    invitation_token: str | None = None
 
 
 class LoginRequest(BaseModel):

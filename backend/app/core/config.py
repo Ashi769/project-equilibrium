@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     # Interview (set to 2 for fast dev testing, 6 for production)
     interview_min_topics: int = 6
 
+    # Invitation system
+    max_invitations_per_woman: int = 2
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",")]
