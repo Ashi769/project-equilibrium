@@ -88,6 +88,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           (user as any).accessToken = data.access_token;
           (user as any).refreshToken = data.refresh_token;
           (user as any).userId = data.user.id;
+          (user as any).gender = data.user.gender;
         }
       }
       return true;
@@ -156,6 +157,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.accessToken = data.access_token;
         token.refreshToken = data.refresh_token;
         token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
+        token.gender = data.user.gender;
       } else {
         // Refresh failed — clear tokens so pages can redirect to login
         token.accessToken = undefined;
