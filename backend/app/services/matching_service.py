@@ -44,9 +44,9 @@ def _meets_bidirectional_filters(user: User, candidate: User) -> bool:
         my_seeking = my_filters.get("seeking_gender")
         their_seeking = their_filters.get("seeking_gender")
 
-        if their_seeking and their_gender not in their_seeking:
+        if their_seeking and my_gender not in their_seeking:
             return False
-        if my_seeking and my_gender not in my_seeking:
+        if my_seeking and their_gender not in my_seeking:
             return False
 
     # Religion: both must have matching preferences
@@ -274,9 +274,6 @@ async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchS
     """Compute matches for a user and store in Match."""
     from app.models.match import Match
     from sqlalchemy import delete
-
-    if not user.psychometric_profile or not user.psychometric_profile.aspiration_vector:
-        return []
 
     matches = await get_matches(user, db)
 

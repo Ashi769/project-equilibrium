@@ -174,6 +174,20 @@ async def _run_pipeline(session_id: str):
 
         await db.commit()
 
+        # Immediately compute matches so the user sees results without waiting for the nightly job
+        try:
+            from app.models.user import User
+            from app.services.matching_service import compute_and_cache_matches
+
+            user_result = await db.execute(select(User).where(User.id == session.user_id))
+            user = user_result.scalar_one_or_none()
+            if user:
+                await compute_and_cache_matches(user, db)
+                user.last_matched_at = datetime.now(timezone.utc)
+                await db.commit()
+        except Exception:
+            pass  # matching failure must not roll back the completed analysis
+
     await engine.dispose()
 
 

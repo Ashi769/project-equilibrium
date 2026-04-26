@@ -83,10 +83,11 @@ async def refresh_matches(
     from app.services.matching_service import compute_and_cache_matches
     from app.models.psychometric import PsychometricProfile, AnalysisStatus
 
-    if (
-        not current_user.psychometric_profile
-        or current_user.psychometric_profile.analysis_status != AnalysisStatus.complete
-    ):
+    profile_result = await db.execute(
+        select(PsychometricProfile).where(PsychometricProfile.user_id == current_user.id)
+    )
+    profile = profile_result.scalar_one_or_none()
+    if not profile or profile.analysis_status != AnalysisStatus.complete:
         raise HTTPException(status_code=400, detail="Profile not ready for matching")
 
     matches = await compute_and_cache_matches(current_user, db)

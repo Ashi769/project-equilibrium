@@ -63,7 +63,7 @@ const { data: status } = useQuery({
   });
 
   const analysisStatus = status?.analysis_status ?? null;
-  const isProcessing = isProcessingParam || analysisStatus === "processing";
+  const isProcessing = (isProcessingParam || analysisStatus === "processing") && analysisStatus !== "failed";
   const isReady = analysisStatus === "complete" || analysisStatus === "failed";
 
   const { data: matches } = useQuery({
