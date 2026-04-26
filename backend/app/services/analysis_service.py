@@ -8,6 +8,7 @@ import json
 from google import genai
 from google.genai import types
 from app.core.config import settings
+from app.core.metrics import track_external_call
 
 ANALYSIS_PROMPT = """You are a psychologist analyzing an interview transcript for a matchmaking platform.
 
@@ -87,16 +88,17 @@ async def analyze_transcript(transcript: list[dict]) -> dict:
     last_err = None
     for i, model in enumerate(models):
         try:
-            response = await client.aio.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.2,
-                    max_output_tokens=2048,
-                    response_mime_type="application/json",
-                    response_json_schema=RESPONSE_SCHEMA,
-                ),
-            )
+            with track_external_call("gemini"):
+                response = await client.aio.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.2,
+                        max_output_tokens=2048,
+                        response_mime_type="application/json",
+                        response_json_schema=RESPONSE_SCHEMA,
+                    ),
+                )
             return json.loads(response.text)
         except Exception as e:
             last_err = e

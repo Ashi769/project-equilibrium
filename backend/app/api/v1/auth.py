@@ -6,6 +6,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from app.core.database import get_db
+from app.core.metrics import track_external_call
 from app.core.security import (
     hash_password,
     verify_password,
@@ -103,11 +104,12 @@ async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db
             f"[DEBUG] Google auth called, id_token present: {bool(body.id_token)}"
         )
         try:
-            idinfo = google_id_token.verify_oauth2_token(
-                body.id_token,
-                google_requests.Request(),
-                settings.google_client_id,
-            )
+            with track_external_call("google_oauth"):
+                idinfo = google_id_token.verify_oauth2_token(
+                    body.id_token,
+                    google_requests.Request(),
+                    settings.google_client_id,
+                )
             logger.info(
                 f"[DEBUG] Google token verified, sub: {idinfo.get('sub')}, email: {idinfo.get('email')}"
             )

@@ -1,11 +1,14 @@
-import logging
-from fastapi import FastAPI, Request
+import time
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.core.config import settings
+from app.core.database import engine
+from app.core.metrics import instrument_sqlalchemy, REDIS_PING_DURATION
 from app.api.v1 import (
     auth,
     debug,
@@ -27,12 +30,14 @@ app = FastAPI(
     redoc_url=None,
 )
 
+# Prometheus — auto-instruments every route for latency + error rate
+Instrumentator(
+    should_group_status_codes=False,
+    excluded_handlers=["/metrics", "/health"],
+).instrument(app).expose(app, include_in_schema=False)
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    response = await call_next(request)
-    return response
-
+# SQLAlchemy query latency + error metrics
+instrument_sqlalchemy(engine)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -58,4 +63,30 @@ app.include_router(signal.router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    checks: dict = {"api": "ok"}
+
+    # DB ping
+    try:
+        from sqlalchemy import text
+        from app.core.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+        checks["db"] = "ok"
+    except Exception as exc:
+        checks["db"] = f"error: {exc}"
+
+    # Redis ping
+    try:
+        import redis.asyncio as aioredis
+        t0 = time.perf_counter()
+        r = aioredis.from_url(settings.resolved_redis_url, socket_connect_timeout=2)
+        await r.ping()
+        await r.aclose()
+        latency = time.perf_counter() - t0
+        REDIS_PING_DURATION.observe(latency)
+        checks["redis"] = "ok"
+    except Exception as exc:
+        checks["redis"] = f"error: {exc}"
+
+    status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
+    return {"status": status, **checks}

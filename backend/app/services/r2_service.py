@@ -1,6 +1,7 @@
 import boto3
 from botocore.config import Config
 from app.core.config import settings
+from app.core.metrics import track_external_call
 
 
 def _client():
@@ -15,27 +16,31 @@ def _client():
 
 
 def upload_photo(data: bytes, key: str, content_type: str) -> str:
-    _client().put_object(
-        Bucket=settings.r2_bucket_name,
-        Key=key,
-        Body=data,
-        ContentType=content_type,
-    )
+    with track_external_call("r2"):
+        _client().put_object(
+            Bucket=settings.r2_bucket_name,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+        )
     return key
 
 
 def download_photo(key: str) -> bytes:
-    response = _client().get_object(Bucket=settings.r2_bucket_name, Key=key)
-    return response["Body"].read()
+    with track_external_call("r2"):
+        response = _client().get_object(Bucket=settings.r2_bucket_name, Key=key)
+        return response["Body"].read()
 
 
 def delete_photo(key: str) -> None:
-    _client().delete_object(Bucket=settings.r2_bucket_name, Key=key)
+    with track_external_call("r2"):
+        _client().delete_object(Bucket=settings.r2_bucket_name, Key=key)
 
 
 def presigned_url(key: str, expires: int = 3600) -> str:
-    return _client().generate_presigned_url(
-        "get_object",
-        Params={"Bucket": settings.r2_bucket_name, "Key": key},
-        ExpiresIn=expires,
-    )
+    with track_external_call("r2"):
+        return _client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.r2_bucket_name, "Key": key},
+            ExpiresIn=expires,
+        )

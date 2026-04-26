@@ -25,6 +25,7 @@ dependencies = [
     "python-jose>=3.5.0",
     "python-multipart>=0.0.26",
     "redis>=7.4.0",
+    "prometheus-fastapi-instrumentator>=7.0.0",
     "slowapi>=0.1.9",
     "spacy>=3.8.14",
     "sqlalchemy>=2.0.49",
