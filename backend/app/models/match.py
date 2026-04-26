@@ -33,6 +33,9 @@ class Match(Base):
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    first_matched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
     user: Mapped["User"] = relationship(
         "User", back_populates="cached_matches", foreign_keys=[user_id]

@@ -6,9 +6,11 @@ Matching engine:
 4. Return top N matches with dimension breakdown
 """
 
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, and_, or_, exists
 from app.models.user import User
+from app.models.match import Match
 from app.models.psychometric import PsychometricProfile, AnalysisStatus
 from app.models.schedule import Meeting, MeetingStatus
 from app.schemas.matches import MatchSummary, MatchDetail, DimensionScore
@@ -189,6 +191,17 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
     )
     conditions.append(~meeting_exists)
 
+    # Cooldown: exclude candidates matched within the last MATCH_COOLDOWN_DAYS
+    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(days=MATCH_COOLDOWN_DAYS)
+    recently_matched = exists().where(
+        and_(
+            Match.user_id == user.id,
+            Match.matched_user_id == User.id,
+            Match.first_matched_at > cooldown_cutoff,
+        )
+    )
+    conditions.append(~recently_matched)
+
     # wants_children hard filter
     my_wants_children = hard_filters.get("wants_children")
     if my_wants_children is not None:
@@ -343,24 +356,56 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
     return matches[:TOP_N]
 
 
+MATCH_COOLDOWN_DAYS = 180  # 6 months — don't re-show the same pair until profiles meaningfully change
+
+
 async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
-    """Compute matches for a user and store in Match."""
-    from app.models.match import Match
+    """Compute matches for a user and store in Match.
+
+    Uses upsert so first_matched_at is preserved across daily refreshes.
+    Candidates within MATCH_COOLDOWN_DAYS of their first appearance are excluded
+    by get_matches — this function only cleans up expired rows outside that window.
+    """
     from sqlalchemy import delete
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     matches = await get_matches(user, db)
+    now = datetime.now(timezone.utc)
 
-    await db.execute(delete(Match).where(Match.user_id == user.id))
-
-    for match in matches:
-        db.add(
-            Match(
-                user_id=user.id,
-                matched_user_id=match.id,
-                compatibility_score=match.compatibility_score,
-                dimension_scores=[d.model_dump() for d in match.top_dimensions],
-            )
+    if matches:
+        rows = [
+            {
+                "user_id": user.id,
+                "matched_user_id": m.id,
+                "compatibility_score": m.compatibility_score,
+                "dimension_scores": [d.model_dump() for d in m.top_dimensions],
+                "computed_at": now,
+                "first_matched_at": now,
+            }
+            for m in matches
+        ]
+        stmt = pg_insert(Match).values(rows).on_conflict_do_update(
+            index_elements=["user_id", "matched_user_id"],
+            set_={
+                "compatibility_score": pg_insert(Match).excluded.compatibility_score,
+                "dimension_scores": pg_insert(Match).excluded.dimension_scores,
+                "computed_at": pg_insert(Match).excluded.computed_at,
+                # first_matched_at intentionally excluded — preserved from original insert
+            },
         )
+        await db.execute(stmt)
+
+    # Clean up rows that are both outside the cooldown window AND not in the current top-N
+    # (rows inside the cooldown stay so get_matches can exclude them next cycle)
+    current_ids = {m.id for m in matches}
+    cutoff = now - timedelta(days=MATCH_COOLDOWN_DAYS)
+    await db.execute(
+        delete(Match).where(
+            Match.user_id == user.id,
+            Match.matched_user_id.not_in(current_ids) if current_ids else text("true"),
+            Match.first_matched_at < cutoff,
+        )
+    )
 
     await db.commit()
     return matches
