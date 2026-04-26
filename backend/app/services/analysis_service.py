@@ -84,7 +84,7 @@ async def analyze_transcript(transcript: list[dict]) -> dict:
 
     prompt = ANALYSIS_PROMPT.replace("{transcript}", transcript_text)
 
-    models = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"]
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
     last_err = None
     for i, model in enumerate(models):
         try:
@@ -94,7 +94,7 @@ async def analyze_transcript(transcript: list[dict]) -> dict:
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         temperature=0.2,
-                        max_output_tokens=2048,
+                        max_output_tokens=4096,
                         response_mime_type="application/json",
                         response_json_schema=RESPONSE_SCHEMA,
                     ),
