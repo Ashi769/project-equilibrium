@@ -14,14 +14,16 @@ from app.schemas.invitation import InvitationOut, InvitationJoinInfo, Invitation
 router = APIRouter(prefix="/invitations", tags=["invitations"])
 
 
-def _active_count_query(user_id: str):
-    """Count invitations that are not expired and not used — counts against the limit."""
+def _consumed_count_query(user_id: str):
+    """Count invitations that consume a slot: used ones (permanent) + active unused ones.
+    Only expired-and-unused invitations free a slot back."""
+    now = datetime.now(timezone.utc)
     return (
         select(func.count())
         .where(
             Invitation.created_by == user_id,
-            Invitation.used_by.is_(None),
-            Invitation.expires_at > datetime.now(timezone.utc),
+            # used (permanent) OR still active (not yet expired)
+            (Invitation.used_by.isnot(None)) | (Invitation.expires_at > now),
         )
     )
 
@@ -63,14 +65,12 @@ async def create_invitation(
             detail="Only women can create invitations",
         )
 
-    # Count only active (unused + not expired) invitations against the limit
-    count_result = await db.execute(_active_count_query(current_user.id))
-    active = count_result.scalar_one()
-    if active >= settings.max_invitations_per_woman:
+    count_result = await db.execute(_consumed_count_query(current_user.id))
+    consumed = count_result.scalar_one()
+    if consumed >= settings.max_invitations_per_woman:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"You already have {settings.max_invitations_per_woman} active invitations. "
-                   "Revoke one or wait for it to expire before creating another.",
+            detail=f"You have reached the maximum of {settings.max_invitations_per_woman} invitations.",
         )
 
     invitation = Invitation(created_by=current_user.id)
@@ -119,14 +119,14 @@ async def list_invitations(
     )
     invitations = result.scalars().all()
 
-    active_result = await db.execute(_active_count_query(current_user.id))
-    active = active_result.scalar_one()
+    consumed_result = await db.execute(_consumed_count_query(current_user.id))
+    consumed = consumed_result.scalar_one()
     max_allowed = settings.max_invitations_per_woman
     used_count = sum(1 for inv in invitations if inv.used_by is not None)
 
     return InvitationListResponse(
         invitations=[InvitationOut.model_validate(inv) for inv in invitations],
         used_count=used_count,
-        remaining=max(0, max_allowed - active),
+        remaining=max(0, max_allowed - consumed),
         max_allowed=max_allowed,
     )

@@ -110,10 +110,10 @@ export default function InvitationsPage() {
           Your invitations
         </h1>
         <p className="text-base" style={{ color: "var(--muted)" }}>
-          You can have up to <strong>{data.max_allowed}</strong> active invitations at a time.
+          You can invite up to <strong>{data.max_allowed}</strong> men in total.
           {data.remaining > 0
-            ? ` You have ${data.remaining} slot${data.remaining !== 1 ? "s" : ""} available.`
-            : " Revoke an unused one to create a new invite."}
+            ? ` You have ${data.remaining} invite${data.remaining !== 1 ? "s" : ""} remaining.`
+            : " You have used all your invitations."}
         </p>
       </div>
 
