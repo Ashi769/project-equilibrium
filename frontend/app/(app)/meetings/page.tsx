@@ -41,7 +41,7 @@ export default function MeetingsPage() {
     queryKey: ["meetings"],
     queryFn: () => api.get<MeetingResponse[]>("/api/v1/schedule", token!),
     enabled: !!token,
-    refetchInterval: 10000,
+    refetchInterval: 30000,
   });
 
   if (isLoading || !meetings) {

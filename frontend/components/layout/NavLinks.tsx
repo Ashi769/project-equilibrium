@@ -30,7 +30,7 @@ export function NavLinks() {
     : BASE_LINKS;
 
   const { data: meetings } = useQuery({
-    queryKey: ["meetings-nav"],
+    queryKey: ["meetings"],
     queryFn: () => api.get<MeetingResponse[]>("/api/v1/schedule", token!),
     enabled: !!token,
     refetchInterval: 30000,
