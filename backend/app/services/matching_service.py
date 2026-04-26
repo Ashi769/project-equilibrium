@@ -192,11 +192,70 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
     # wants_children hard filter
     my_wants_children = hard_filters.get("wants_children")
     if my_wants_children is not None:
-        # Only match with people who share the same preference (or haven't set it)
         conditions.append(
             or_(
                 User.hard_filters["wants_children"].as_boolean() == my_wants_children,
                 User.hard_filters["wants_children"].is_(None),
+            )
+        )
+
+    # Religion filter — SQL level, bidirectional
+    # A: candidate's religion must match what I'm seeking
+    my_seeking_religion = hard_filters.get("seeking_religion")
+    if user.religion and my_seeking_religion and my_seeking_religion != "doesn't matter":
+        conditions.append(User.religion == my_seeking_religion)
+    # B: candidate either has no religion preference or wants my religion
+    if user.religion:
+        conditions.append(
+            or_(
+                User.hard_filters["seeking_religion"].is_(None),
+                User.hard_filters["seeking_religion"].as_string() == "doesn't matter",
+                User.hard_filters["seeking_religion"].as_string() == user.religion,
+            )
+        )
+
+    # Drinking filter — SQL level, bidirectional
+    my_seeking_drinking = hard_filters.get("seeking_drinking")
+    if user.drinking and my_seeking_drinking and my_seeking_drinking != "doesn't matter":
+        conditions.append(User.drinking == my_seeking_drinking)
+    if user.drinking:
+        conditions.append(
+            or_(
+                User.hard_filters["seeking_drinking"].is_(None),
+                User.hard_filters["seeking_drinking"].as_string() == "doesn't matter",
+                User.hard_filters["seeking_drinking"].as_string() == user.drinking,
+            )
+        )
+
+    # Smoking filter — SQL level, bidirectional
+    my_seeking_smoking = hard_filters.get("seeking_smoking")
+    if user.smoking and my_seeking_smoking and my_seeking_smoking != "doesn't matter":
+        conditions.append(User.smoking == my_seeking_smoking)
+    if user.smoking:
+        conditions.append(
+            or_(
+                User.hard_filters["seeking_smoking"].is_(None),
+                User.hard_filters["seeking_smoking"].as_string() == "doesn't matter",
+                User.hard_filters["seeking_smoking"].as_string() == user.smoking,
+            )
+        )
+
+    # Food filter — SQL level, bidirectional with compatibility matrix
+    my_seeking_food = hard_filters.get("seeking_food")
+    my_food = user.food_preference
+    # A: candidate's food must be compatible with what I eat
+    if my_food and my_seeking_food and my_seeking_food != "doesn't matter":
+        my_compatible = FOOD_COMPATIBILITY.get(my_food, [my_food])
+        conditions.append(User.food_preference.in_(my_compatible))
+    # B: candidate either has no food preference or their compatible list accepts my food
+    #    Reverse-map: which food types have a compatible list that includes my_food?
+    if my_food:
+        reverse_compatible = [f for f, compat in FOOD_COMPATIBILITY.items() if my_food in compat]
+        conditions.append(
+            or_(
+                User.hard_filters["seeking_food"].is_(None),
+                User.hard_filters["seeking_food"].as_string() == "doesn't matter",
+                User.food_preference.in_(reverse_compatible),
             )
         )
 
