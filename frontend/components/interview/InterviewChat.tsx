@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
 interface Message { role: "assistant" | "user"; content: string; }
+interface ResumeData { session_id: string; messages: Message[]; }
 
 const PROGRESS_STAGES = [
   { pct: 0,  label: "Initializing Interview Protocol" },
@@ -29,6 +30,8 @@ export function InterviewChat({ accessToken }: { accessToken: string }) {
   const [isEnded,     setIsEnded]     = useState(false);
   const [isStarting,  setIsStarting]  = useState(true);
   const [progress,    setProgress]    = useState(0);
+  const [resumeData,  setResumeData]  = useState<ResumeData | null>(null);
+  const [resumed,     setResumed]     = useState(false);
   const bottomRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -43,7 +46,9 @@ export function InterviewChat({ accessToken }: { accessToken: string }) {
     PROGRESS_STAGES[0],
   );
 
-  useEffect(() => {
+  const startFresh = useCallback(() => {
+    setResumeData(null);
+    setIsStarting(true);
     api
       .post<{ session_id: string; opening_message: string }>("/api/v1/interview/start", {}, accessToken)
       .then(({ session_id, opening_message }) => {
@@ -53,6 +58,28 @@ export function InterviewChat({ accessToken }: { accessToken: string }) {
       })
       .catch(() => setIsStarting(false));
   }, [accessToken]);
+
+  const continueSession = useCallback((data: ResumeData) => {
+    setSessionId(data.session_id);
+    setMessages(data.messages);
+    setResumed(true);
+    setResumeData(null);
+    setIsStarting(false);
+  }, []);
+
+  useEffect(() => {
+    api
+      .get<ResumeData | null>("/api/v1/interview/session", accessToken)
+      .then((data) => {
+        if (data?.session_id) {
+          setResumeData(data);
+          setIsStarting(false);
+        } else {
+          startFresh();
+        }
+      })
+      .catch(() => startFresh());
+  }, [accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -131,6 +158,33 @@ export function InterviewChat({ accessToken }: { accessToken: string }) {
     router.push("/selection?processing=true");
   }
 
+  /* ─── Resume prompt ─── */
+  if (resumeData) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-6 px-4">
+        <div className="w-full max-w-sm p-6 border-2 border-[#2d2d2d] bg-white space-y-4"
+          style={{ borderRadius: "var(--radius-wobbly)", boxShadow: "var(--shadow-hard)" }}>
+          <div className="space-y-1">
+            <p className="font-heading text-xl font-bold" style={{ color: "var(--ink)" }}>
+              Unfinished interview
+            </p>
+            <p className="text-sm" style={{ color: "var(--muted)" }}>
+              You started an interview earlier. Pick up where you left off?
+            </p>
+          </div>
+          <div className="flex gap-3 pt-1">
+            <Button className="flex-1" onClick={() => continueSession(resumeData)}>
+              Continue
+            </Button>
+            <Button variant="outline" className="flex-1" onClick={startFresh}>
+              Start fresh
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   /* ─── Loading state ─── */
   if (isStarting) {
     return (
@@ -182,7 +236,7 @@ export function InterviewChat({ accessToken }: { accessToken: string }) {
               role={msg.role}
               content={msg.content}
               isStreaming={isStreaming && i === messages.length - 1 && msg.role === "assistant"}
-              useTypewriter={i === 0 && msg.role === "assistant"}
+              useTypewriter={!resumed && i === 0 && msg.role === "assistant"}
             />
           ))}
         </AnimatePresence>

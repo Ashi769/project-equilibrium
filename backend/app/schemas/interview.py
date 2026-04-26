@@ -17,3 +17,13 @@ class InterviewEndRequest(BaseModel):
 
 class AnalysisStatusResponse(BaseModel):
     status: str
+
+
+class InterviewMessage(BaseModel):
+    role: str
+    content: str
+
+
+class InterviewResumeResponse(BaseModel):
+    session_id: str
+    messages: list[InterviewMessage]

@@ -17,6 +17,7 @@ from app.schemas.interview import (
     InterviewStartResponse,
     InterviewMessageRequest,
     InterviewEndRequest,
+    InterviewResumeResponse,
 )
 from app.services.interview_service import (
     stream_response,
@@ -28,6 +29,33 @@ from app.services.interview_service import (
 from app.workers.tasks import process_interview_transcript
 
 router = APIRouter(prefix="/interview", tags=["interview"])
+
+
+@router.get("/session", response_model=InterviewResumeResponse | None)
+async def get_active_session(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(InterviewSession)
+        .where(
+            InterviewSession.user_id == current_user.id,
+            InterviewSession.processing_status == ProcessingStatus.pending,
+            InterviewSession.completed_at.is_(None),
+        )
+        .order_by(InterviewSession.started_at.desc())
+        .limit(1)
+    )
+    session = result.scalar_one_or_none()
+    if not session or not session.transcript_encrypted:
+        return None
+
+    messages = decrypt_json(session.transcript_encrypted)
+    # Only offer resume if the user actually responded — not just the opening message
+    if not any(m["role"] == "user" for m in messages):
+        return None
+
+    return InterviewResumeResponse(session_id=session.id, messages=messages)
 
 
 @router.post("/start", response_model=InterviewStartResponse)
