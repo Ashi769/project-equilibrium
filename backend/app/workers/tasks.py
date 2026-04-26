@@ -200,43 +200,51 @@ def refresh_daily_matches(self):
         raise self.retry(exc=exc)
 
 
+MATCH_BATCH_SIZE = 100
+
+
 async def _refresh_daily_matches():
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     from sqlalchemy import select, and_
     from app.models.psychometric import PsychometricProfile, AnalysisStatus
-    from app.models.match import Match
     from app.models.user import User
     from app.services.matching_service import compute_and_cache_matches
 
     engine = create_async_engine(settings.async_database_url, echo=False)
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
+    # Fetch only IDs up front — cheap, bounds initial memory regardless of user count
     async with Session() as db:
         yesterday = datetime.now(timezone.utc) - timedelta(days=1)
-
-        result = await db.execute(
-            select(User)
+        id_result = await db.execute(
+            select(User.id)
             .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
             .where(
                 and_(
                     PsychometricProfile.analysis_status == AnalysisStatus.complete,
                     PsychometricProfile.identity_vector.is_not(None),
-                    (
-                        User.last_matched_at.is_(None)
-                        | (User.last_matched_at < yesterday)
-                    ),
+                    User.last_matched_at.is_(None)
+                    | (User.last_matched_at < yesterday),
                 )
             )
         )
-        users = result.scalars().all()
+        user_ids = [row[0] for row in id_result.all()]
 
-        for user in users:
-            try:
-                await compute_and_cache_matches(user, db)
-                user.last_matched_at = datetime.now(timezone.utc)
-            except Exception:
-                pass
-
-        await db.commit()
+    # Process in batches with a fresh session per batch so the identity map
+    # never grows beyond MATCH_BATCH_SIZE users worth of objects
+    for i in range(0, len(user_ids), MATCH_BATCH_SIZE):
+        batch_ids = user_ids[i : i + MATCH_BATCH_SIZE]
+        async with Session() as db:
+            user_result = await db.execute(
+                select(User).where(User.id.in_(batch_ids))
+            )
+            users = user_result.scalars().all()
+            for user in users:
+                try:
+                    await compute_and_cache_matches(user, db)
+                    user.last_matched_at = datetime.now(timezone.utc)
+                except Exception:
+                    pass
+            await db.commit()
 
     await engine.dispose()
