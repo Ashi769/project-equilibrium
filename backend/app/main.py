@@ -5,6 +5,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_fastapi_instrumentator.metrics import default, latency
 
 from app.core.config import settings
 from app.core.database import engine
@@ -30,11 +31,22 @@ app = FastAPI(
     redoc_url=None,
 )
 
-# Prometheus — auto-instruments every route for latency + error rate
-Instrumentator(
-    should_group_status_codes=False,
-    excluded_handlers=["/metrics", "/health"],
-).instrument(app).expose(app, include_in_schema=False)
+# Prometheus: only the two metrics we care about
+#   - http_requests_total          → error rate via rate(...) + status class label
+#   - http_request_duration_seconds → p50/p75/p99 via histogram_quantile(...)
+# Buckets chosen for a typical API: ignore sub-10ms noise, flag anything >2s
+_LATENCY_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0)
+
+(
+    Instrumentator(
+        should_group_status_codes=True,   # 2xx / 4xx / 5xx — avoids per-code cardinality
+        should_group_untemplated=True,    # collapse unmapped paths to "<unspecified>"
+        excluded_handlers=["/metrics", "/health"],
+    )
+    .add(default(latency_highr_buckets=_LATENCY_BUCKETS, latency_lowr_buckets=_LATENCY_BUCKETS))
+    .instrument(app)
+    .expose(app, include_in_schema=False)
+)
 
 # SQLAlchemy query latency + error metrics
 instrument_sqlalchemy(engine)
