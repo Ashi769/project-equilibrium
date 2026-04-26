@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update as sql_update
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_current_user_id
 from app.models.user import User
 from app.models.psychometric import PsychometricProfile, AnalysisStatus
 from app.models.invitation import Invitation
@@ -99,7 +99,6 @@ async def update_profile(
         db.add(current_user)
 
     await db.commit()
-    await db.refresh(current_user)
 
     result = await db.execute(
         select(PsychometricProfile).where(
@@ -112,23 +111,27 @@ async def update_profile(
 
 @router.get("/analysis-status")
 async def analysis_status(
-    current_user: User = Depends(get_current_user),
+    user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(PsychometricProfile).where(
-            PsychometricProfile.user_id == current_user.id
-        )
-    )
-    profile = result.scalar_one_or_none()
-    if not profile:
+    # Only fetch the two columns we need — avoids loading 3×384-dim vectors
+    row = (await db.execute(
+        select(PsychometricProfile.analysis_status, PsychometricProfile.identity_vector)
+        .where(PsychometricProfile.user_id == user_id)
+    )).first()
+
+    if not row:
         return {"analysis_status": "pending"}
 
-    if (
-        profile.analysis_status == AnalysisStatus.failed
-        and profile.identity_vector is not None
-    ):
-        profile.analysis_status = AnalysisStatus.complete
-        await db.commit()
+    current_status, identity_vector = row
 
-    return {"analysis_status": profile.analysis_status}
+    if current_status == AnalysisStatus.failed and identity_vector is not None:
+        await db.execute(
+            sql_update(PsychometricProfile)
+            .where(PsychometricProfile.user_id == user_id)
+            .values(analysis_status=AnalysisStatus.complete)
+        )
+        await db.commit()
+        return {"analysis_status": AnalysisStatus.complete}
+
+    return {"analysis_status": current_status}
