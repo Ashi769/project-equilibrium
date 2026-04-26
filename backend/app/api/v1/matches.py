@@ -4,7 +4,7 @@ from fastapi import Header
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
@@ -36,7 +36,7 @@ async def list_matches(
     user_result = await db.execute(
         select(User)
         .where(User.id.in_(matched_ids))
-        .options(selectinload(User.psychometric_profile))
+        .options(joinedload(User.psychometric_profile))
     )
     users_by_id = {u.id: u for u in user_result.scalars().all()}
 

@@ -102,6 +102,8 @@ async def propose_meeting(
             status_code=409, detail="Active meeting already exists with this match"
         )
 
+    match_user = await db.get(User, body.match_id)
+
     meeting = Meeting(
         proposer_id=current_user.id,
         match_id=body.match_id,
@@ -125,9 +127,6 @@ async def propose_meeting(
     )
 
     await db.commit()
-    await db.refresh(meeting)
-
-    match_user = await db.get(User, body.match_id)
     return _meeting_to_response(
         meeting,
         current_user.id,
@@ -162,7 +161,6 @@ async def lock_slot(
     meeting.locked_slot = body.locked_slot
     meeting.status = MeetingStatus.confirmed
     await db.commit()
-    await db.refresh(meeting)
     return _meeting_to_response(
         meeting, current_user.id, proposer_name, match_name, proposer_email, match_email
     )
@@ -190,7 +188,6 @@ async def submit_verdict(
         meeting.status = MeetingStatus.completed
 
     await db.commit()
-    await db.refresh(meeting)
     return _meeting_to_response(
         meeting, current_user.id, proposer_name, match_name, proposer_email, match_email
     )
