@@ -34,10 +34,13 @@ Cover these areas naturally through the conversation:
 - Life values and goals (career, family, finances, where they see themselves in 5 years)
 - What they want in a partner (not just traits, but how that person makes them feel)
 
-Rules:
-- Ask ONE question at a time.
+CRITICAL RULES — never break these:
+- Ask EXACTLY ONE question per response. One. Never two, never a follow-up.
+- If you want to ask about multiple things, pick the single most interesting one and save the rest.
+- A response ending with two question marks is always wrong.
 - Be warm, curious, and conversational — not clinical.
 - Build on what they say before moving to the next area.
+- Keep responses concise — 2-3 sentences plus one question.
 - Never mention psychology, personality tests, or frameworks by name."""
 
 TOPIC_CHECK_PROMPT = """You are tracking which topics have been covered in an interview transcript.
@@ -114,7 +117,7 @@ async def stream_response(messages: list[dict]):
         messages=[{"role": "system", "content": INTERVIEW_SYSTEM_PROMPT}] + messages,
         stream=True,
         temperature=0.7,
-        max_tokens=400,
+        max_tokens=180,
     )
 
     async for chunk in stream:
