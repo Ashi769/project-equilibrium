@@ -148,6 +148,8 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
     if not my_profile or my_profile.aspiration_vector is None:
         return []
 
+    import json as _json
+
     hard_filters = user.hard_filters or {}
     seeking_genders = hard_filters.get("seeking_gender", [])
     max_age_diff = hard_filters.get("max_age_diff")
@@ -159,7 +161,19 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
         PsychometricProfile.identity_vector.is_not(None),
     ]
 
-    # Gender filter - bidirectional (in Python after fetch)
+    # Gender filter — SQL level, bidirectional
+    # A: candidate's gender must be one I'm seeking
+    if seeking_genders:
+        conditions.append(User.gender.in_(seeking_genders))
+    # B: candidate must want my gender (or have no preference set / empty list)
+    if user.gender:
+        conditions.append(
+            text(
+                "(coalesce(jsonb_array_length((users.hard_filters->'seeking_gender')::jsonb), 0) = 0"
+                " OR (users.hard_filters->'seeking_gender')::jsonb @> :my_gender_json::jsonb)"
+            ).bindparams(my_gender_json=_json.dumps([user.gender]))
+        )
+
     # Age filter
     if max_age_diff and user.age:
         conditions.append(
