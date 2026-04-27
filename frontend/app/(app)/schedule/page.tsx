@@ -62,14 +62,16 @@ function ScheduleInner() {
   const searchParams = useSearchParams();
   const router       = useRouter();
   const { data: session } = useSession();
-  const matchName = searchParams.get("name") ?? "Your Match";
-  const matchId   = searchParams.get("match") ?? "unknown";
-  const token     = session?.accessToken as string | undefined;
+  const matchName  = searchParams.get("name") ?? "Your Match";
+  const matchId    = searchParams.get("match") ?? "unknown";
+  const counterId  = searchParams.get("counter") ?? null;   // counter-propose mode
+  const token      = session?.accessToken as string | undefined;
+  const isCounter  = !!counterId;
 
   const { data: existingMeetings } = useQuery({
     queryKey: ["meetings-for-match", matchId],
     queryFn: () => api.get<MeetingResponse[]>("/api/v1/schedule", token!),
-    enabled: !!token,
+    enabled: !!token && !isCounter,
   });
 
   const existingMeeting = existingMeetings?.find(
@@ -98,12 +100,21 @@ function ScheduleInner() {
     setError(null);
     const selectedSlots = ALL_SLOTS.filter((s) => selected.has(s.id));
     try {
-      const res = await api.post<MeetingResponse>("/api/v1/schedule/propose", {
-        match_id: matchId,
-        slot_1:  selectedSlots[0].date.toISOString(),
-        slot_2:  selectedSlots[1].date.toISOString(),
-        slot_3:  selectedSlots[2].date.toISOString(),
-      }, token);
+      let res: MeetingResponse;
+      if (isCounter) {
+        res = await api.post<MeetingResponse>(`/api/v1/schedule/${counterId}/counter`, {
+          slot_1: selectedSlots[0].date.toISOString(),
+          slot_2: selectedSlots[1].date.toISOString(),
+          slot_3: selectedSlots[2].date.toISOString(),
+        }, token);
+      } else {
+        res = await api.post<MeetingResponse>("/api/v1/schedule/propose", {
+          match_id: matchId,
+          slot_1:  selectedSlots[0].date.toISOString(),
+          slot_2:  selectedSlots[1].date.toISOString(),
+          slot_3:  selectedSlots[2].date.toISOString(),
+        }, token);
+      }
       setProposedSlots([res.slot_1, res.slot_2, res.slot_3]);
       setSubmitted(true);
     } catch (e: unknown) {
@@ -111,8 +122,8 @@ function ScheduleInner() {
     }
   }
 
-  /* ─── Existing confirmed meeting ─── */
-  if (existingMeeting && !submitted && existingMeeting.status === "confirmed") {
+  /* ─── Existing confirmed meeting (non-counter flow only) ─── */
+  if (!isCounter && existingMeeting && !submitted && existingMeeting.status === "confirmed") {
     return (
       <SuccessState
         title="Meeting Confirmed ✓"
@@ -123,7 +134,7 @@ function ScheduleInner() {
     );
   }
 
-  if (existingMeeting && !submitted) {
+  if (!isCounter && existingMeeting && !submitted) {
     const slots = [existingMeeting.slot_1, existingMeeting.slot_2, existingMeeting.slot_3];
     return (
       <SuccessState
@@ -157,11 +168,13 @@ function ScheduleInner() {
           Scheduling Concierge
         </div>
         <h1 className="font-heading text-4xl font-bold" style={{ color: "var(--ink)" }}>
-          Propose 3 Times
+          {isCounter ? "Suggest New Times" : "Propose 3 Times"}
         </h1>
         <p className="text-base mt-2 leading-relaxed" style={{ color: "var(--muted)" }}>
-          Select exactly 3 time slots for your 30-minute session with{" "}
-          <strong style={{ color: "var(--ink)" }}>{matchName}</strong>. They'll pick the one that works.
+          {isCounter
+            ? <>Pick 3 times that work for you — <strong style={{ color: "var(--ink)" }}>{matchName}</strong> will choose one.</>
+            : <>Select exactly 3 time slots for your 30-minute session with{" "}<strong style={{ color: "var(--ink)" }}>{matchName}</strong>. They'll pick the one that works.</>
+          }
         </p>
       </div>
 

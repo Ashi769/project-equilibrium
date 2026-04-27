@@ -62,7 +62,7 @@ export default function MeetingsPage() {
   const confirmed   = meetings.filter((m) => m.status === "confirmed");
   const outgoing    = meetings.filter((m) => m.proposer_id === userId && m.status === "proposed");
   const connections = meetings.filter((m) => m.is_mutual_match);
-  const past        = meetings.filter((m) => m.status === "completed" || m.status === "cancelled");
+  const past        = meetings.filter((m) => !m.is_mutual_match && (m.status === "completed" || m.status === "cancelled"));
 
   if (meetings.length === 0) {
     return (
@@ -144,11 +144,22 @@ function IncomingCard({ meeting, token, queryClient }: {
   token: string;
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
+  const router = useRouter();
   const [locking, setLocking] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const lockMutation = useMutation({
     mutationFn: (slotIso: string) =>
       api.post<MeetingResponse>("/api/v1/schedule/lock", { meeting_id: meeting.id, locked_slot: slotIso }, token),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      queryClient.invalidateQueries({ queryKey: ["meetings-nav"] });
+    },
+  });
+
+  const declineMutation = useMutation({
+    mutationFn: () =>
+      api.post<MeetingResponse>(`/api/v1/schedule/${meeting.id}/decline`, {}, token),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
       queryClient.invalidateQueries({ queryKey: ["meetings-nav"] });
@@ -160,6 +171,8 @@ function IncomingCard({ meeting, token, queryClient }: {
     { iso: meeting.slot_2, label: formatSlot(meeting.slot_2) },
     { iso: meeting.slot_3, label: formatSlot(meeting.slot_3) },
   ];
+
+  const busy = lockMutation.isPending || declineMutation.isPending;
 
   return (
     <motion.div
@@ -187,12 +200,12 @@ function IncomingCard({ meeting, token, queryClient }: {
           <button
             key={slot.iso}
             onClick={() => { setLocking(slot.iso); lockMutation.mutate(slot.iso); }}
-            disabled={lockMutation.isPending}
+            disabled={busy}
             className="w-full text-left px-4 py-3 flex items-center justify-between border-2 border-[#2d2d2d] bg-white transition-all duration-75 hover:bg-[#2d5da1] hover:text-white hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
             style={{
               borderRadius: "var(--radius-wobbly-sm)",
               boxShadow: "var(--shadow-hard-sm)",
-              opacity: lockMutation.isPending && locking !== slot.iso ? 0.4 : 1,
+              opacity: busy && locking !== slot.iso ? 0.4 : 1,
               background: locking === slot.iso && lockMutation.isPending ? "rgba(255,77,77,0.08)" : undefined,
             }}
           >
@@ -206,6 +219,56 @@ function IncomingCard({ meeting, token, queryClient }: {
           </button>
         ))}
       </div>
+
+      {/* Decline / counter options */}
+      <div className="mt-4 pt-4 border-t-2 border-dashed border-[#e5e0d8]">
+        {!confirming ? (
+          <div className="flex items-center justify-between gap-3">
+            <button
+              onClick={() => router.push(`/schedule?counter=${meeting.id}&name=${encodeURIComponent(meeting.proposer_name ?? "")}`)}
+              disabled={busy}
+              className="text-sm font-medium transition-colors"
+              style={{ color: "var(--secondary)" }}
+            >
+              These times don't work →
+            </button>
+            <button
+              onClick={() => setConfirming(true)}
+              disabled={busy}
+              className="text-sm transition-colors"
+              style={{ color: "var(--muted)" }}
+            >
+              Not interested
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <p className="text-sm flex-1" style={{ color: "var(--ink)" }}>
+              Decline this proposal?
+            </p>
+            <button
+              onClick={() => setConfirming(false)}
+              disabled={busy}
+              className="text-sm font-medium"
+              style={{ color: "var(--muted)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => declineMutation.mutate()}
+              disabled={busy}
+              className="text-sm font-medium px-3 py-1 border-2 border-[#ff4d4d] transition-colors hover:bg-[#ff4d4d] hover:text-white"
+              style={{ borderRadius: "var(--radius-wobbly-sm)", color: "var(--accent)" }}
+            >
+              {declineMutation.isPending ? "Declining…" : "Yes, decline"}
+            </button>
+          </div>
+        )}
+        {declineMutation.isError && (
+          <p className="text-sm mt-2" style={{ color: "var(--accent)" }}>Failed to decline. Try again.</p>
+        )}
+      </div>
+
       {lockMutation.isError && (
         <p className="text-sm mt-3" style={{ color: "var(--accent)" }}>Failed to lock slot. Try again.</p>
       )}

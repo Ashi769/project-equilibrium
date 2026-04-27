@@ -15,6 +15,12 @@ class LockRequest(BaseModel):
     locked_slot: datetime
 
 
+class CounterRequest(BaseModel):
+    slot_1: datetime
+    slot_2: datetime
+    slot_3: datetime
+
+
 class VerdictRequest(BaseModel):
     meeting_id: str
     verdict: VerdictChoice

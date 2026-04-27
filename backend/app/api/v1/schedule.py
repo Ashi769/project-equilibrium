@@ -10,6 +10,7 @@ from app.models.schedule import Meeting, MeetingStatus, VerdictChoice
 from app.models.match import Match
 from app.schemas.schedule import (
     ProposeRequest,
+    CounterRequest,
     LockRequest,
     VerdictRequest,
     MeetingResponse,
@@ -190,6 +191,83 @@ async def submit_verdict(
     await db.commit()
     return _meeting_to_response(
         meeting, current_user.id, proposer_name, match_name, proposer_email, match_email
+    )
+
+
+@router.post("/{meeting_id}/decline", response_model=MeetingResponse)
+async def decline_meeting(
+    meeting_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await _fetch_meeting_with_users(meeting_id, db)
+    if not row:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    meeting, proposer_name, match_name, proposer_email, match_email = row
+
+    if current_user.id != meeting.match_id:
+        raise HTTPException(status_code=403, detail="Only the recipient can decline")
+
+    if meeting.status != MeetingStatus.proposed:
+        raise HTTPException(status_code=400, detail="Only proposed meetings can be declined")
+
+    meeting.status = MeetingStatus.cancelled
+    await db.commit()
+    return _meeting_to_response(
+        meeting, current_user.id, proposer_name, match_name, proposer_email, match_email
+    )
+
+
+@router.post("/{meeting_id}/counter", response_model=MeetingResponse)
+async def counter_propose(
+    meeting_id: str,
+    body: CounterRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await _fetch_meeting_with_users(meeting_id, db)
+    if not row:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    meeting, proposer_name, match_name, proposer_email, match_email = row
+
+    if current_user.id != meeting.match_id:
+        raise HTTPException(status_code=403, detail="Only the recipient can counter-propose")
+
+    if meeting.status != MeetingStatus.proposed:
+        raise HTTPException(status_code=400, detail="Only proposed meetings can be countered")
+
+    original_proposer_id = meeting.proposer_id
+    meeting.status = MeetingStatus.cancelled
+
+    existing = await db.execute(
+        select(Meeting).where(
+            Meeting.proposer_id == current_user.id,
+            Meeting.match_id == original_proposer_id,
+            Meeting.status.in_([MeetingStatus.proposed, MeetingStatus.confirmed]),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Active meeting already exists")
+
+    new_meeting = Meeting(
+        proposer_id=current_user.id,
+        match_id=original_proposer_id,
+        slot_1=body.slot_1,
+        slot_2=body.slot_2,
+        slot_3=body.slot_3,
+    )
+    db.add(new_meeting)
+    await db.commit()
+    await db.refresh(new_meeting)
+
+    # Names/emails are now flipped — current_user is the new proposer
+    return _meeting_to_response(
+        new_meeting,
+        current_user.id,
+        proposer_name=match_name,
+        match_name=proposer_name,
+        proposer_email=match_email,
+        match_email=proposer_email,
     )
 
 
