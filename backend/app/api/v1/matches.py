@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import Header
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import joinedload
 
 from app.core.database import get_db
@@ -11,6 +11,7 @@ from app.core.deps import get_current_user
 from app.core.config import settings
 from app.models.user import User
 from app.models.match import Match
+from app.models.schedule import Meeting, MeetingStatus
 from app.schemas.matches import MatchSummary, MatchDetail
 from app.services.matching_service import get_match_detail, MAX_VISIBLE_MATCHES, TOP_N
 
@@ -22,7 +23,26 @@ async def list_matches(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Fetch the full cached pool — discovery selection needs positions 5–20
+    # Active meetings (proposed + confirmed) consume slots from the same 5-connection cap.
+    # Someone you're already meeting with was removed from the match cache when the
+    # meeting was proposed, so they won't appear here — but their slot is still occupied.
+    active_meeting_count = (await db.execute(
+        select(func.count())
+        .select_from(Meeting)
+        .where(
+            or_(
+                Meeting.proposer_id == current_user.id,
+                Meeting.match_id == current_user.id,
+            ),
+            Meeting.status.in_([MeetingStatus.proposed, MeetingStatus.confirmed]),
+        )
+    )).scalar() or 0
+
+    remaining_slots = max(0, MAX_VISIBLE_MATCHES - active_meeting_count)
+    if remaining_slots == 0:
+        return []
+
+    # Fetch the full cached pool — discovery selection needs positions beyond remaining_slots
     result = await db.execute(
         select(Match)
         .where(Match.user_id == current_user.id)
@@ -61,16 +81,18 @@ async def list_matches(
             ),
         ))
 
-    # Fewer than the visible cap — return all, no split needed
-    if len(pairs) <= MAX_VISIBLE_MATCHES:
+    # Fewer pairs than available slots — return all, no split needed
+    if len(pairs) <= remaining_slots:
         return [s for _, s in pairs]
 
-    # 4 core matches: top 4 by compatibility score, untouched
-    core = [s for _, s in pairs[: MAX_VISIBLE_MATCHES - 1]]
+    # Always reserve 1 slot for discovery when we have room for at least 2.
+    # Core: top (remaining_slots - 1) by score.
+    # Discovery: from the rest of the pool, whoever has waited longest (oldest first_matched_at).
+    if remaining_slots < 2:
+        return [s for _, s in pairs[:remaining_slots]]
 
-    # 1 discovery match: from positions 5–20, surface whoever has waited longest
-    # (oldest first_matched_at = has been in pool without visibility the longest)
-    candidate_pool = pairs[MAX_VISIBLE_MATCHES - 1 :]
+    core = [s for _, s in pairs[: remaining_slots - 1]]
+    candidate_pool = pairs[remaining_slots - 1 :]
     _, discovery_summary = min(candidate_pool, key=lambda p: p[0].first_matched_at)
 
     return core + [discovery_summary]
