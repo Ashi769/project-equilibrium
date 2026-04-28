@@ -7,7 +7,31 @@ import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
 
 const TOTAL_SECONDS = 30 * 60;
+const FIRST_PROMPT_MS = 3 * 60 * 1000;   // first prompt at 3 min
+const PROMPT_INTERVAL_MS = 4.5 * 60 * 1000; // then every 4.5 min → 6 prompts across 30 min
+const MAX_PROMPTS = 6;
+
 const WS_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/^http/, "ws") ?? "ws://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+// One focused prompt per OCEAN dimension — topic only, no scores exposed
+const DIMENSION_PROMPTS: Record<string, string> = {
+  openness:          "What's a belief you've each changed significantly in the last few years?",
+  conscientiousness: "How do you approach long-term goals — and what would you want from a partner in that?",
+  extraversion:      "How do you each recharge, and what does that mean for time together vs. apart?",
+  agreeableness:     "Walk me through how you each handle conflict when you feel strongly you're right.",
+  neuroticism:       "What does emotional support look like for you — giving and receiving?",
+};
+
+const FALLBACK_PROMPTS = [
+  "What does a fulfilling relationship look like to you in five years?",
+  "How do you navigate the tension between independence and togetherness?",
+  "What's something you'd need a partner to understand about you early on?",
+  "How do you each think about financial partnership?",
+  "What role does shared ambition play in a relationship for you?",
+  "Discuss your ideal living arrangement in the next few years.",
+];
+
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
@@ -17,17 +41,6 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: "turn:openrelay.metered.ca:443?transport=udp", username: "openrelayproject", credential: "openrelayprojectsecret" },
   { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayprojectsecret" },
   { urls: "turn:openrelay.metered.ca:80?transport=tcp", username: "openrelayproject", credential: "openrelayprojectsecret" },
-];
-
-const AI_PROMPTS = [
-  "Discuss your approaches to personal growth and reinvention.",
-  "Share your views on career-life integration.",
-  "Explore your thoughts on family planning timelines.",
-  "Discuss your relationship with social connection and solitude.",
-  "Share your approach to financial partnership.",
-  "What does emotional availability mean to you?",
-  "Discuss your ideal living arrangement in 5 years.",
-  "How do you navigate disagreement in close relationships?",
 ];
 
 interface FeedItem { text: string; ts: string; }
@@ -336,10 +349,51 @@ export default function MeetPage() {
   const [verdict, setVerdict] = useState<"commit" | "pool" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feed, setFeed] = useState<FeedItem[]>([]);
-  const [promptIndex, setPromptIndex] = useState(0);
   const feedRef = useRef<HTMLDivElement>(null);
 
+  // Personalised prompts built from the match's top OCEAN dimensions
+  const promptsRef = useRef<string[]>(FALLBACK_PROMPTS.slice(0, MAX_PROMPTS));
+  const promptIdxRef = useRef(0);
+
   const { localVideoRef, remoteVideoRef, connected, micMuted, toggleMic, dispose } = useWebRTC(meetingId, token, callActive);
+
+  // Fetch match dimensions once token is ready — before call starts
+  useEffect(() => {
+    if (!token || !meetingId) return;
+    async function load() {
+      try {
+        // 1. Find the other user's ID from the meeting list
+        const meetings = await fetch(`${API_URL}/api/v1/schedule`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(r => r.ok ? r.json() : []);
+        const meeting = meetings.find((m: { id: string }) => m.id === meetingId);
+        if (!meeting) return;
+        const userId = session?.userId as string | undefined;
+        const otherUserId = meeting.proposer_id === userId ? meeting.match_id : meeting.proposer_id;
+
+        // 2. Get match detail → dimension_scores (ordered by score desc)
+        const detail = await fetch(`${API_URL}/api/v1/matches/${otherUserId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(r => r.ok ? r.json() : null);
+
+        if (!detail?.dimension_scores?.length) return;
+
+        // 3. Build ordered prompt list from top dimensions, fill with fallbacks
+        const ordered: string[] = [];
+        for (const dim of detail.dimension_scores as { label: string }[]) {
+          const prompt = DIMENSION_PROMPTS[dim.label.toLowerCase()];
+          if (prompt && !ordered.includes(prompt)) ordered.push(prompt);
+          if (ordered.length >= MAX_PROMPTS) break;
+        }
+        for (const fb of FALLBACK_PROMPTS) {
+          if (ordered.length >= MAX_PROMPTS) break;
+          if (!ordered.includes(fb)) ordered.push(fb);
+        }
+        promptsRef.current = ordered;
+      } catch { /* keep fallbacks */ }
+    }
+    load();
+  }, [token, meetingId, session?.userId]);
 
   // Timer
   useEffect(() => {
@@ -358,22 +412,30 @@ export default function MeetPage() {
     return () => clearInterval(id);
   }, [callActive, callEnded, dispose]);
 
-  // AI prompts
+  // Prompt scheduler: first at 3 min, then every 4.5 min — max 6 total
   useEffect(() => {
     if (!callActive || callEnded) return;
-    const id = setInterval(() => {
-      const prompt = AI_PROMPTS[promptIndex % AI_PROMPTS.length];
-      const now = new Date();
-      const ts = `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`;
-      setFeed((prev) => [...prev, { text: prompt, ts }]);
-      setPromptIndex((p) => p + 1);
-    }, 18000);
-    return () => clearInterval(id);
-  }, [callActive, callEnded, promptIndex]);
+    promptIdxRef.current = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
 
-  useEffect(() => {
-    if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
-  }, [feed]);
+    function fireNext(delay: number) {
+      const t = setTimeout(() => {
+        const idx = promptIdxRef.current;
+        if (idx >= promptsRef.current.length) return;
+        const now = new Date();
+        const ts = `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`;
+        setFeed(prev => [...prev, { text: promptsRef.current[idx], ts }]);
+        promptIdxRef.current = idx + 1;
+        if (promptIdxRef.current < promptsRef.current.length) {
+          fireNext(PROMPT_INTERVAL_MS);
+        }
+      }, delay);
+      timers.push(t);
+    }
+
+    fireNext(FIRST_PROMPT_MS);
+    return () => timers.forEach(clearTimeout);
+  }, [callActive, callEnded]);
 
   async function submitVerdict(choice: "commit" | "pool") {
     setSubmitting(true);
@@ -528,29 +590,49 @@ export default function MeetPage() {
           <div className="absolute bottom-1 right-2 text-xs" style={{ color: "var(--muted)", textShadow: "0 0 4px #000" }}>You</div>
         </div>
 
-        {/* Matchmaker Feed — bottom-right */}
-        <div className="absolute bottom-4 right-4 w-64 max-h-48 flex flex-col z-10" style={{ border: "1px solid var(--border)", background: "rgba(10,10,10,0.92)" }}>
-          <div className="px-3 py-2 flex items-center gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
-            <div className="w-1.5 h-1.5" style={{ background: "var(--accent)" }} />
-            <span className="text-xs tracking-[0.15em] uppercase" style={{ color: "var(--accent)" }}>Matchmaker Feed</span>
-          </div>
-          <div ref={feedRef} className="flex-1 overflow-y-auto p-3 space-y-2">
-            {feed.length === 0 ? (
-              <p className="text-xs italic" style={{ color: "var(--dim)" }}>AI suggestions will appear here...</p>
-            ) : (
-              <AnimatePresence>
-                {feed.map((item, i) => (
-                  <motion.div key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>
-                    <p className="text-xs" style={{ color: "var(--muted)" }}>
-                      <span style={{ color: "var(--dim)" }}>{item.ts} </span>
-                      <span style={{ color: "var(--accent)" }}>AI → </span>
-                      {item.text}
-                    </p>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+        {/* Conversation Guide — bottom-right */}
+        <div className="absolute bottom-20 right-4 w-72 z-10" style={{ border: "1px solid var(--border)", background: "rgba(10,10,10,0.92)", backdropFilter: "blur(8px)" }}>
+          <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)" }}>
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5" style={{ background: "var(--accent)" }} />
+              <span className="text-xs tracking-[0.15em] uppercase" style={{ color: "var(--accent)" }}>Guide</span>
+            </div>
+            {feed.length > 0 && (
+              <span className="text-xs" style={{ color: "var(--dim)" }}>{feed.length} / {MAX_PROMPTS}</span>
             )}
           </div>
+
+          <AnimatePresence mode="wait">
+            {feed.length === 0 ? (
+              <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="px-4 py-4">
+                <p className="text-xs italic leading-relaxed" style={{ color: "var(--dim)" }}>
+                  A conversation prompt will appear at 3 minutes.
+                </p>
+              </motion.div>
+            ) : (
+              <motion.div
+                key={feed.length}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.4 }}
+                className="px-4 py-4"
+              >
+                <p className="text-sm leading-relaxed" style={{ color: "var(--fg)", lineHeight: 1.6 }}>
+                  {feed[feed.length - 1].text}
+                </p>
+                {feed.length > 1 && (
+                  <div className="mt-3 pt-3 space-y-1" style={{ borderTop: "1px solid var(--border)" }}>
+                    {feed.slice(0, -1).map((item, i) => (
+                      <p key={i} className="text-xs leading-snug" style={{ color: "var(--dim)" }}>
+                        {item.text}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>
