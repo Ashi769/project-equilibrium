@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, delete
+from datetime import datetime, timezone
+from sqlalchemy import select, or_, update
 from sqlalchemy.orm import aliased
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
 from app.models.schedule import Meeting, MeetingStatus, VerdictChoice
-from app.models.match import Match
+from app.models.match import Match, MatchStatus
 from app.schemas.schedule import (
     ProposeRequest,
     CounterRequest,
@@ -114,17 +115,24 @@ async def propose_meeting(
     )
     db.add(meeting)
 
+    now = datetime.now(timezone.utc)
     await db.execute(
-        delete(Match).where(
+        update(Match)
+        .where(
             Match.user_id == current_user.id,
             Match.matched_user_id == body.match_id,
+            Match.status == MatchStatus.active,
         )
+        .values(status=MatchStatus.consumed, status_changed_at=now)
     )
     await db.execute(
-        delete(Match).where(
+        update(Match)
+        .where(
             Match.user_id == body.match_id,
             Match.matched_user_id == current_user.id,
+            Match.status == MatchStatus.active,
         )
+        .values(status=MatchStatus.consumed, status_changed_at=now)
     )
 
     await db.commit()

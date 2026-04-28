@@ -2,9 +2,16 @@ import secrets
 import string
 import uuid
 from datetime import datetime, timezone, timedelta
+from enum import Enum
 from sqlalchemy import String, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
+
+
+class InvitationStatus(str, Enum):
+    active = "active"
+    used = "used"
+    revoked = "revoked"
 
 # Unambiguous uppercase alphanumeric — no O/0/I/1 confusion
 _ALPHABET = "".join(c for c in (string.ascii_uppercase + string.digits) if c not in "O0I1")
@@ -38,6 +45,10 @@ class Invitation(Base):
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_default_expires
     )
+    status: Mapped[InvitationStatus] = mapped_column(
+        String(16), nullable=False, default=InvitationStatus.active
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

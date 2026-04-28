@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_current_user_id
 from app.models.user import User
 from app.models.psychometric import PsychometricProfile, AnalysisStatus
-from app.models.invitation import Invitation
+from app.models.invitation import Invitation, InvitationStatus
 from app.schemas.profile import ProfileResponse, ProfileUpdateRequest
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -82,10 +82,11 @@ async def update_profile(
                 sql_update(Invitation)
                 .where(
                     Invitation.token == body.invitation_token.upper(),
+                    Invitation.status == InvitationStatus.active,
                     Invitation.used_by.is_(None),
                     Invitation.expires_at > now,
                 )
-                .values(used_by=current_user.id, used_at=now)
+                .values(used_by=current_user.id, used_at=now, status=InvitationStatus.used)
                 .returning(Invitation.id)
             )
             if consumed.scalar_one_or_none() is None:

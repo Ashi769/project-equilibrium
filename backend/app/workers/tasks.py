@@ -260,9 +260,9 @@ async def _run_rescue_pass(Session) -> None:
       - hard_filter_candidates  > 0 → inject into the best compatible hosts we can find
     """
     import uuid
-    from sqlalchemy import select, and_, delete
+    from sqlalchemy import select, and_, update
     from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from app.models.match import Match
+    from app.models.match import Match, MatchStatus
     from app.models.user import User
     from app.models.psychometric import PsychometricProfile, AnalysisStatus
     from app.services.matching_service import (
@@ -275,7 +275,12 @@ async def _run_rescue_pass(Session) -> None:
 
     # Find users with complete profiles that don't appear in any match pool
     async with Session() as db:
-        exposed_subq = select(Match.matched_user_id).distinct().scalar_subquery()
+        exposed_subq = (
+            select(Match.matched_user_id)
+            .where(Match.status == MatchStatus.active)
+            .distinct()
+            .scalar_subquery()
+        )
         result = await db.execute(
             select(User.id)
             .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
@@ -316,21 +321,25 @@ async def _run_rescue_pass(Session) -> None:
                 if host_match.compatibility_score < RESCUE_SCORE_FLOOR:
                     break
 
-                # Skip if V is already in this host's cache
+                # Skip if V is already actively cached for this host
                 already_cached = (await db.execute(
                     select(Match).where(
                         Match.user_id == host_match.id,
                         Match.matched_user_id == user_v.id,
+                        Match.status == MatchStatus.active,
                     )
                 )).scalar_one_or_none()
                 if already_cached:
                     injection_count += 1
                     continue
 
-                # Check host's cache capacity
+                # Check host's active cache capacity
                 host_caches = (await db.execute(
                     select(Match)
-                    .where(Match.user_id == host_match.id)
+                    .where(
+                        Match.user_id == host_match.id,
+                        Match.status == MatchStatus.active,
+                    )
                     .order_by(Match.compatibility_score.asc())
                 )).scalars().all()
 
@@ -343,18 +352,35 @@ async def _run_rescue_pass(Session) -> None:
                     continue  # host's cache is full with better-scoring matches
 
                 if evict_id:
-                    await db.execute(delete(Match).where(Match.id == evict_id))
+                    await db.execute(
+                        update(Match)
+                        .where(Match.id == evict_id)
+                        .values(status=MatchStatus.evicted, status_changed_at=now)
+                    )
 
+                new_row = {
+                    "id": str(uuid.uuid4()),
+                    "user_id": host_match.id,
+                    "matched_user_id": user_v.id,
+                    "compatibility_score": host_match.compatibility_score,
+                    "dimension_scores": [d.model_dump() for d in host_match.top_dimensions],
+                    "computed_at": now,
+                    "first_matched_at": now,
+                    "status": MatchStatus.active,
+                    "status_changed_at": None,
+                }
                 await db.execute(
-                    pg_insert(Match).values({
-                        "id": str(uuid.uuid4()),
-                        "user_id": host_match.id,
-                        "matched_user_id": user_v.id,
-                        "compatibility_score": host_match.compatibility_score,
-                        "dimension_scores": [d.model_dump() for d in host_match.top_dimensions],
-                        "computed_at": now,
-                        "first_matched_at": now,
-                    }).on_conflict_do_nothing()
+                    pg_insert(Match).values(new_row).on_conflict_do_update(
+                        index_elements=["user_id", "matched_user_id"],
+                        set_={
+                            "compatibility_score": pg_insert(Match).excluded.compatibility_score,
+                            "dimension_scores": pg_insert(Match).excluded.dimension_scores,
+                            "computed_at": pg_insert(Match).excluded.computed_at,
+                            "status": MatchStatus.active,
+                            "status_changed_at": None,
+                            # first_matched_at preserved from original insert
+                        },
+                    )
                 )
                 await db.commit()
                 injection_count += 1

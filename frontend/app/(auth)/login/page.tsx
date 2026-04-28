@@ -25,7 +25,7 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
-  const { status } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -42,14 +42,10 @@ function LoginForm() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (status === "authenticated") {
+    if (status === "authenticated" && session?.accessToken) {
       router.replace("/selection");
     }
-  }, [status, router]);
-
-  if (status === "loading") {
-    return null;
-  }
+  }, [status, session, router]);
 
   async function onSubmit(data: F) {
     setLoading(true); setError(null);

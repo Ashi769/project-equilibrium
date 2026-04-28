@@ -6,8 +6,10 @@ from datetime import timezone
 class InvitationOut(BaseModel):
     id: str
     token: str
+    status: str
     used_by: str | None
     used_at: datetime | None
+    revoked_at: datetime | None
     expires_at: datetime
     created_at: datetime
 
@@ -19,7 +21,12 @@ class InvitationOut(BaseModel):
     @computed_field
     @property
     def is_used(self) -> bool:
-        return self.used_by is not None
+        return self.status == "used"
+
+    @computed_field
+    @property
+    def is_revoked(self) -> bool:
+        return self.status == "revoked"
 
     model_config = {"from_attributes": True}
 

@@ -8,22 +8,25 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.config import settings
 from app.models.user import User
-from app.models.invitation import Invitation
+from app.models.invitation import Invitation, InvitationStatus
 from app.schemas.invitation import InvitationOut, InvitationJoinInfo, InvitationListResponse
 
 router = APIRouter(prefix="/invitations", tags=["invitations"])
 
 
 def _consumed_count_query(user_id: str):
-    """Count invitations that consume a slot: used ones (permanent) + active unused ones.
-    Only expired-and-unused invitations free a slot back."""
+    """Count invitations that consume a slot: used ones (permanent) + active-and-unexpired ones.
+    Revoked and expired-unused invitations free their slot back."""
     now = datetime.now(timezone.utc)
     return (
         select(func.count())
         .where(
             Invitation.created_by == user_id,
-            # used (permanent) OR still active (not yet expired)
-            (Invitation.used_by.isnot(None)) | (Invitation.expires_at > now),
+            (Invitation.status == InvitationStatus.used)
+            | (
+                (Invitation.status == InvitationStatus.active)
+                & (Invitation.expires_at > now)
+            ),
         )
     )
 
@@ -38,8 +41,10 @@ async def join_info(code: str, db: AsyncSession = Depends(get_db)):
 
     if not invitation:
         raise HTTPException(status_code=404, detail="Invitation not found")
-    if invitation.used_by is not None:
+    if invitation.status == InvitationStatus.used:
         raise HTTPException(status_code=410, detail="This invitation has already been used")
+    if invitation.status == InvitationStatus.revoked:
+        raise HTTPException(status_code=410, detail="This invitation has been revoked")
     if datetime.now(timezone.utc) > invitation.expires_at:
         raise HTTPException(status_code=410, detail="This invitation has expired")
 
@@ -94,10 +99,13 @@ async def revoke_invitation(
     invitation = result.scalar_one_or_none()
     if not invitation:
         raise HTTPException(status_code=404, detail="Invitation not found")
-    if invitation.used_by is not None:
+    if invitation.status == InvitationStatus.revoked:
+        raise HTTPException(status_code=400, detail="Invitation is already revoked")
+    if invitation.status == InvitationStatus.used:
         raise HTTPException(status_code=400, detail="Cannot revoke a used invitation")
 
-    await db.delete(invitation)
+    invitation.status = InvitationStatus.revoked
+    invitation.revoked_at = datetime.now(timezone.utc)
     await db.commit()
 
 
@@ -122,7 +130,7 @@ async def list_invitations(
     consumed_result = await db.execute(_consumed_count_query(current_user.id))
     consumed = consumed_result.scalar_one()
     max_allowed = settings.max_invitations_per_woman
-    used_count = sum(1 for inv in invitations if inv.used_by is not None)
+    used_count = sum(1 for inv in invitations if inv.status == InvitationStatus.used)
 
     return InvitationListResponse(
         invitations=[InvitationOut.model_validate(inv) for inv in invitations],

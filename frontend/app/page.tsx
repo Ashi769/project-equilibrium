@@ -7,18 +7,14 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
 export default function Home() {
-  const { status } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
 
   useEffect(() => {
-    if (status === "authenticated") {
+    if (status === "authenticated" && session?.accessToken) {
       router.replace("/selection");
     }
-  }, [status, router]);
-
-  if (status === "loading") {
-    return null;
-  }
+  }, [status, session, router]);
 
   return (
     <main className="min-h-screen flex flex-col" style={{ background: "var(--paper)" }}>

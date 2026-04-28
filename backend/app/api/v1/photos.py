@@ -1,5 +1,6 @@
 import io
 import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import RedirectResponse
 from PIL import Image
@@ -9,7 +10,7 @@ from sqlalchemy import select, func
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.models.photo import UserPhoto
+from app.models.photo import UserPhoto, PhotoStatus
 from app.models.psychometric import PsychometricProfile
 from app.services import r2_service
 
@@ -46,7 +47,7 @@ async def list_photos(
 ):
     result = await db.execute(
         select(UserPhoto)
-        .where(UserPhoto.user_id == current_user.id)
+        .where(UserPhoto.user_id == current_user.id, UserPhoto.status == PhotoStatus.active)
         .order_by(UserPhoto.uploaded_at)
     )
     photos = result.scalars().all()
@@ -96,14 +97,18 @@ async def upload_photos(
         uploaded.append(await _upload(photo, is_selfie=False))
     uploaded.append(await _upload(selfie, is_selfie=True))
 
-    # Delete old photos from R2 and DB
+    # Retire old photos: remove from R2 (storage cost) but keep DB rows for audit
     old_result = await db.execute(
-        select(UserPhoto).where(UserPhoto.user_id == current_user.id)
+        select(UserPhoto).where(
+            UserPhoto.user_id == current_user.id, UserPhoto.status == PhotoStatus.active
+        )
     )
+    now = datetime.now(timezone.utc)
     for old in old_result.scalars().all():
         if old.r2_key:
             r2_service.delete_photo(old.r2_key)
-        await db.delete(old)
+        old.status = PhotoStatus.deleted
+        old.deleted_at = now
 
     for filename, key, is_selfie in uploaded:
         db.add(
@@ -132,6 +137,7 @@ async def photo_status(
     result = await db.execute(
         select(func.count()).where(
             UserPhoto.user_id == current_user.id,
+            UserPhoto.status == PhotoStatus.active,
             UserPhoto.r2_key != "",
         )
     )
@@ -147,7 +153,9 @@ async def delete_photo(
 ):
     result = await db.execute(
         select(UserPhoto).where(
-            UserPhoto.id == photo_id, UserPhoto.user_id == current_user.id
+            UserPhoto.id == photo_id,
+            UserPhoto.user_id == current_user.id,
+            UserPhoto.status == PhotoStatus.active,
         )
     )
     photo = result.scalar_one_or_none()
@@ -155,7 +163,8 @@ async def delete_photo(
         raise HTTPException(status_code=404)
     if photo.r2_key:
         r2_service.delete_photo(photo.r2_key)
-    await db.delete(photo)
+    photo.status = PhotoStatus.deleted
+    photo.deleted_at = datetime.now(timezone.utc)
     await db.commit()
 
 
@@ -169,7 +178,9 @@ async def add_photos(
     """Add gallery photos and/or replace selfie without touching existing photos."""
     existing = await db.execute(
         select(UserPhoto).where(
-            UserPhoto.user_id == current_user.id, UserPhoto.is_selfie == False
+            UserPhoto.user_id == current_user.id,
+            UserPhoto.is_selfie == False,
+            UserPhoto.status == PhotoStatus.active,
         )
     )
     existing_count = len(existing.scalars().all())
@@ -196,16 +207,20 @@ async def add_photos(
         return filename, key, is_selfie
 
     if selfie:
-        # Replace existing selfie
+        # Replace existing selfie: remove from R2 but keep DB row
         old_selfie = await db.execute(
             select(UserPhoto).where(
-                UserPhoto.user_id == current_user.id, UserPhoto.is_selfie == True
+                UserPhoto.user_id == current_user.id,
+                UserPhoto.is_selfie == True,
+                UserPhoto.status == PhotoStatus.active,
             )
         )
+        now = datetime.now(timezone.utc)
         for old in old_selfie.scalars().all():
             if old.r2_key:
                 r2_service.delete_photo(old.r2_key)
-            await db.delete(old)
+            old.status = PhotoStatus.deleted
+            old.deleted_at = now
         filename, key, _ = await _upload(selfie, is_selfie=True)
         db.add(
             UserPhoto(
@@ -241,6 +256,7 @@ async def serve_photo(
         select(UserPhoto).where(
             UserPhoto.id == photo_id,
             UserPhoto.user_id == current_user.id,
+            UserPhoto.status == PhotoStatus.active,
         )
     )
     photo = result.scalar_one_or_none()
@@ -261,6 +277,7 @@ async def get_user_selfie(
         select(UserPhoto).where(
             UserPhoto.user_id == user_id,
             UserPhoto.is_selfie == True,
+            UserPhoto.status == PhotoStatus.active,
         )
     )
     photo = result.scalar_one_or_none()
@@ -281,7 +298,7 @@ async def get_user_carousel(
     """Get user's photos for carousel: first gallery photo, then selfie. No auth."""
     result = await db.execute(
         select(UserPhoto)
-        .where(UserPhoto.user_id == user_id)
+        .where(UserPhoto.user_id == user_id, UserPhoto.status == PhotoStatus.active)
         .order_by(UserPhoto.is_selfie == False, UserPhoto.uploaded_at)
         .limit(2)
     )

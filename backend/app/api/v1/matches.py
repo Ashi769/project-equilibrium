@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.config import settings
 from app.models.user import User
-from app.models.match import Match
+from app.models.match import Match, MatchStatus
 from app.models.schedule import Meeting, MeetingStatus
 from app.schemas.matches import MatchSummary, MatchDetail
 from app.services.matching_service import get_match_detail, MAX_VISIBLE_MATCHES, TOP_N
@@ -45,7 +45,7 @@ async def list_matches(
     # Fetch the full cached pool — discovery selection needs positions beyond remaining_slots
     result = await db.execute(
         select(Match)
-        .where(Match.user_id == current_user.id)
+        .where(Match.user_id == current_user.id, Match.status == MatchStatus.active)
         .order_by(Match.compatibility_score.desc())
         .limit(TOP_N)
     )

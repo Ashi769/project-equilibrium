@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone
+from enum import Enum
 from sqlalchemy import (
     String,
     Float,
@@ -11,6 +12,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
+
+
+class MatchStatus(str, Enum):
+    active = "active"
+    consumed = "consumed"   # match proposed a meeting
+    evicted = "evicted"     # bumped from cache by higher-scoring match
+    expired = "expired"     # outside cooldown window, not in current top-N
 
 
 class Match(Base):
@@ -35,6 +43,12 @@ class Match(Base):
     )
     first_matched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    status: Mapped[MatchStatus] = mapped_column(
+        String(16), nullable=False, default=MatchStatus.active
+    )
+    status_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     user: Mapped["User"] = relationship(

@@ -116,6 +116,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
           return token;
         }
+        // Backend doesn't recognise this Google account — destroy session
+        return null;
       }
 
       // Initial sign-in with credentials
@@ -147,23 +149,21 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
 
       // Access token expired — try to refresh
-      if (!token.refreshToken) return token;
+      if (!token.refreshToken) return null;
 
       const data = await getBackendTokens("refresh", {
         refresh_token: token.refreshToken as string,
       });
 
-      if (data) {
-        token.accessToken = data.access_token;
-        token.refreshToken = data.refresh_token;
-        token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
-        token.gender = data.user.gender;
-      } else {
-        // Refresh failed — clear tokens so pages can redirect to login
-        token.accessToken = undefined;
-        token.refreshToken = undefined;
+      if (!data) {
+        // Refresh failed — destroy session so client sees "unauthenticated"
+        return null;
       }
 
+      token.accessToken = data.access_token;
+      token.refreshToken = data.refresh_token;
+      token.accessTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
+      token.gender = data.user.gender;
       return token;
     },
 

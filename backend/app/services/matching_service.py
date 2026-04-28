@@ -393,8 +393,9 @@ async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchS
     Candidates within MATCH_COOLDOWN_DAYS of their first appearance are excluded
     by get_matches — this function only cleans up expired rows outside that window.
     """
-    from sqlalchemy import delete
+    from sqlalchemy import update
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.models.match import MatchStatus
 
     matches = await get_matches(user, db)
     now = datetime.now(timezone.utc)
@@ -408,6 +409,8 @@ async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchS
                 "dimension_scores": [d.model_dump() for d in m.top_dimensions],
                 "computed_at": now,
                 "first_matched_at": now,
+                "status": MatchStatus.active,
+                "status_changed_at": None,
             }
             for m in matches
         ]
@@ -417,21 +420,26 @@ async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchS
                 "compatibility_score": pg_insert(Match).excluded.compatibility_score,
                 "dimension_scores": pg_insert(Match).excluded.dimension_scores,
                 "computed_at": pg_insert(Match).excluded.computed_at,
+                "status": MatchStatus.active,
+                "status_changed_at": None,
                 # first_matched_at intentionally excluded — preserved from original insert
             },
         )
         await db.execute(stmt)
 
-    # Clean up rows that are both outside the cooldown window AND not in the current top-N
+    # Mark as expired rows that are both outside the cooldown window AND not in the current top-N
     # (rows inside the cooldown stay so get_matches can exclude them next cycle)
     current_ids = {m.id for m in matches}
     cutoff = now - timedelta(days=MATCH_COOLDOWN_DAYS)
     await db.execute(
-        delete(Match).where(
+        update(Match)
+        .where(
             Match.user_id == user.id,
             Match.matched_user_id.not_in(current_ids) if current_ids else text("true"),
             Match.first_matched_at < cutoff,
+            Match.status == MatchStatus.active,
         )
+        .values(status=MatchStatus.expired, status_changed_at=now)
     )
 
     await db.commit()
