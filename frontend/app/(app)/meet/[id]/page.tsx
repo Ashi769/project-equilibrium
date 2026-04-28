@@ -462,11 +462,11 @@ export default function MeetPage() {
 
   if (callEnded) {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 flex flex-col items-center justify-center gap-10 text-center px-8" style={{ background: "var(--bg)" }}>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-10 text-center px-8" style={{ background: "#0a0a0a" }}>
         <div>
-          <p className="text-xs tracking-[0.25em] uppercase mb-3" style={{ color: "var(--muted)" }}>Session Complete</p>
-          <h2 className="serif font-normal" style={{ fontSize: "3rem", color: "var(--fg)", lineHeight: 1.1 }}>Deliver Your Verdict</h2>
-          <p className="text-sm mt-4 max-w-sm mx-auto" style={{ color: "var(--muted)", lineHeight: 1.7 }}>
+          <p className="text-xs tracking-[0.25em] uppercase mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>Session Complete</p>
+          <h2 className="serif font-normal" style={{ fontSize: "3rem", color: "#ffffff", lineHeight: 1.1 }}>Deliver Your Verdict</h2>
+          <p className="text-sm mt-4 max-w-sm mx-auto" style={{ color: "rgba(255,255,255,0.55)", lineHeight: 1.7 }}>
             Based on your 30-minute session, do you wish to pursue a deeper connection or return to the candidate pool?
           </p>
         </div>
@@ -474,7 +474,7 @@ export default function MeetPage() {
           <button onClick={() => submitVerdict("commit")} disabled={submitting} className="px-10 py-4 text-sm tracking-[0.15em] uppercase font-medium transition-all" style={{ background: "var(--accent)", color: "#121212", opacity: submitting ? 0.6 : 1 }}>
             {submitting ? "Submitting..." : "Commit"}
           </button>
-          <button onClick={() => submitVerdict("pool")} disabled={submitting} className="px-10 py-4 text-sm tracking-[0.15em] uppercase font-medium transition-all" style={{ border: "1px solid var(--border)", color: "var(--muted)", background: "transparent", opacity: submitting ? 0.6 : 1 }}>
+          <button onClick={() => submitVerdict("pool")} disabled={submitting} className="px-10 py-4 text-sm tracking-[0.15em] uppercase font-medium transition-all" style={{ border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.6)", background: "transparent", opacity: submitting ? 0.6 : 1 }}>
             Return to Pool
           </button>
         </div>
@@ -484,11 +484,11 @@ export default function MeetPage() {
 
   if (!callActive) {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 flex flex-col items-center justify-center gap-8 text-center" style={{ background: "var(--bg)" }}>
-        <div className="w-16 h-16 flex items-center justify-center serif text-2xl" style={{ border: "1px solid var(--accent)", color: "var(--accent)" }}>⚖</div>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 text-center" style={{ background: "#0a0a0a" }}>
+        <div className="w-16 h-16 flex items-center justify-center serif text-2xl" style={{ border: "1px solid rgba(255,77,77,0.5)", color: "#ffffff", background: "rgba(255,77,77,0.12)" }}>⚖</div>
         <div>
-          <h2 className="serif text-3xl font-normal" style={{ color: "var(--fg)" }}>30-Minute Session</h2>
-          <p className="text-sm mt-2 max-w-xs" style={{ color: "var(--muted)" }}>
+          <h2 className="serif text-3xl font-normal" style={{ color: "#ffffff" }}>30-Minute Session</h2>
+          <p className="text-sm mt-2 max-w-xs" style={{ color: "rgba(255,255,255,0.55)" }}>
             Your camera and microphone will be requested. The session terminates automatically at 30:00.
           </p>
         </div>
@@ -508,30 +508,30 @@ export default function MeetPage() {
   }
 
   return (
-    <div className="fixed inset-0 flex flex-col" style={{ background: "#0a0a0a" }}>
-      <div className="absolute top-0 left-0 right-0 h-0.5 transition-all duration-1000 z-10" style={{ width: `${pctLeft * 100}%`, background: isUrgent ? "var(--red)" : "var(--accent)" }} />
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: "#0a0a0a" }}>
+      <div className="absolute top-0 left-0 right-0 h-0.5 transition-all duration-1000 z-10" style={{ width: `${pctLeft * 100}%`, background: isUrgent ? "#ef4444" : "rgba(255,255,255,0.4)" }} />
 
       {/* Timer — top center */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-5 py-2 flex items-center gap-3" style={{ border: `1px solid ${isUrgent ? "var(--red)" : "var(--border)"}`, background: "rgba(10,10,10,0.9)" }}>
-        <div className="w-1.5 h-1.5" style={{ background: isUrgent ? "var(--red)" : "var(--accent)" }} />
-        <span className="font-mono text-lg tracking-widest" style={{ color: isUrgent ? "var(--red)" : "var(--fg)", fontVariantNumeric: "tabular-nums" }}>
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-5 py-2 flex items-center gap-3" style={{ border: `1px solid ${isUrgent ? "#ef4444" : "rgba(255,255,255,0.15)"}`, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(10px)", borderRadius: "999px" }}>
+        <div className="w-1.5 h-1.5 rounded-full" style={{ background: isUrgent ? "#ef4444" : "rgba(255,255,255,0.5)" }} />
+        <span className="font-mono text-lg tracking-widest" style={{ color: isUrgent ? "#ef4444" : "#ffffff", fontVariantNumeric: "tabular-nums" }}>
           {String(mins).padStart(2, "0")}:{String(secs).padStart(2, "0")}
         </span>
       </div>
 
 
       {/* Bottom controls */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3">
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
         {/* Mic toggle */}
         <button
           onClick={toggleMic}
           title={micMuted ? "Unmute mic" : "Mute mic"}
           className="w-11 h-11 flex items-center justify-center transition-colors"
           style={{
-            border: `1px solid ${micMuted ? "#ef4444" : "var(--border)"}`,
+            border: `1px solid ${micMuted ? "#ef4444" : "rgba(255,255,255,0.2)"}`,
             background: micMuted ? "rgba(239,68,68,0.15)" : "rgba(10,10,10,0.85)",
             backdropFilter: "blur(8px)",
-            color: micMuted ? "#ef4444" : "var(--muted)",
+            color: micMuted ? "#ef4444" : "rgba(255,255,255,0.7)",
           }}
         >
           {micMuted ? (
@@ -577,35 +577,34 @@ export default function MeetPage() {
           <div className="absolute inset-0 flex items-center justify-center" style={{ background: "#0f0e0c" }}>
             <div className="text-center">
               <div className="w-12 h-12 mx-auto mb-4 flex items-center justify-center">
-                <div className="w-full h-full animate-spin" style={{ border: "1px solid var(--border)", borderTopColor: "var(--accent)" }} />
+                <div className="w-full h-full animate-spin" style={{ border: "1px solid rgba(255,255,255,0.1)", borderTopColor: "rgba(255,255,255,0.6)", borderRadius: "50%" }} />
               </div>
-              <p className="text-xs tracking-widest uppercase" style={{ color: "var(--dim)" }}>Waiting for match to join...</p>
+              <p className="text-xs tracking-widest uppercase" style={{ color: "rgba(255,255,255,0.4)" }}>Waiting for match to join...</p>
             </div>
           </div>
         )}
 
-        {/* Local video — PIP bottom-left */}
-        <div className="absolute bottom-20 left-4 z-10 overflow-hidden" style={{ width: 180, height: 135, border: "1px solid var(--border)", background: "#000" }}>
+        {/* Local video — PIP top-right (below timer, doesn't overlap guide) */}
+        <div className="absolute top-16 right-4 z-10 overflow-hidden" style={{ width: 120, height: 90, border: "1px solid rgba(255,255,255,0.2)", background: "#000", borderRadius: 8 }}>
           <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />
-          <div className="absolute bottom-1 right-2 text-xs" style={{ color: "var(--muted)", textShadow: "0 0 4px #000" }}>You</div>
         </div>
 
         {/* Conversation Guide — bottom-right */}
-        <div className="absolute bottom-20 right-4 w-72 z-10" style={{ border: "1px solid var(--border)", background: "rgba(10,10,10,0.92)", backdropFilter: "blur(8px)" }}>
-          <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)" }}>
+        <div className="absolute bottom-20 right-4 w-72 z-10" style={{ border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,10,10,0.92)", backdropFilter: "blur(8px)", borderRadius: 8 }}>
+          <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
             <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5" style={{ background: "var(--accent)" }} />
-              <span className="text-xs tracking-[0.15em] uppercase" style={{ color: "var(--accent)" }}>Guide</span>
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />
+              <span className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>Conversation guide</span>
             </div>
             {feed.length > 0 && (
-              <span className="text-xs" style={{ color: "var(--dim)" }}>{feed.length} / {MAX_PROMPTS}</span>
+              <span className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>{feed.length} / {MAX_PROMPTS}</span>
             )}
           </div>
 
           <AnimatePresence mode="wait">
             {feed.length === 0 ? (
               <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="px-4 py-4">
-                <p className="text-xs italic leading-relaxed" style={{ color: "var(--dim)" }}>
+                <p className="text-xs italic leading-relaxed" style={{ color: "rgba(255,255,255,0.35)" }}>
                   A conversation prompt will appear at 3 minutes.
                 </p>
               </motion.div>
@@ -618,13 +617,13 @@ export default function MeetPage() {
                 transition={{ duration: 0.4 }}
                 className="px-4 py-4"
               >
-                <p className="text-sm leading-relaxed" style={{ color: "var(--fg)", lineHeight: 1.6 }}>
+                <p className="text-sm leading-relaxed" style={{ color: "#ffffff", lineHeight: 1.6 }}>
                   {feed[feed.length - 1].text}
                 </p>
                 {feed.length > 1 && (
-                  <div className="mt-3 pt-3 space-y-1" style={{ borderTop: "1px solid var(--border)" }}>
+                  <div className="mt-3 pt-3 space-y-1" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                     {feed.slice(0, -1).map((item, i) => (
-                      <p key={i} className="text-xs leading-snug" style={{ color: "var(--dim)" }}>
+                      <p key={i} className="text-xs leading-snug" style={{ color: "rgba(255,255,255,0.3)" }}>
                         {item.text}
                       </p>
                     ))}
@@ -643,10 +642,10 @@ function VerdictScreen({ headline, sub, accent, onContinue, ctaLabel }: {
   headline: string; sub: string; accent: string; onContinue: () => void; ctaLabel: string;
 }) {
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="fixed inset-0 flex flex-col items-center justify-center gap-8 text-center px-8" style={{ background: "var(--bg)" }}>
-      <h2 className="serif font-normal" style={{ fontSize: "4rem", color: accent, lineHeight: 1 }}>{headline}</h2>
-      <p className="text-sm max-w-sm" style={{ color: "var(--muted)", lineHeight: 1.8 }}>{sub}</p>
-      <button onClick={onContinue} className="px-8 py-3 text-xs tracking-[0.2em] uppercase transition-all" style={{ border: "1px solid var(--border)", color: "var(--muted)" }}>
+    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 text-center px-8" style={{ background: "#0a0a0a" }}>
+      <h2 className="serif font-normal" style={{ fontSize: "4rem", color: accent === "var(--accent)" ? "var(--accent)" : "#ffffff", lineHeight: 1 }}>{headline}</h2>
+      <p className="text-sm max-w-sm" style={{ color: "rgba(255,255,255,0.55)", lineHeight: 1.8 }}>{sub}</p>
+      <button onClick={onContinue} className="px-8 py-3 text-xs tracking-[0.2em] uppercase transition-all" style={{ border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.6)" }}>
         {ctaLabel}
       </button>
     </motion.div>
