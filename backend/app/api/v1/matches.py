@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.models.user import User
 from app.models.match import Match
 from app.schemas.matches import MatchSummary, MatchDetail
-from app.services.matching_service import get_match_detail
+from app.services.matching_service import get_match_detail, MAX_VISIBLE_MATCHES, TOP_N
 
 router = APIRouter(prefix="/matches", tags=["matches"])
 
@@ -22,10 +22,12 @@ async def list_matches(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Fetch the full cached pool — discovery selection needs positions 5–20
     result = await db.execute(
         select(Match)
         .where(Match.user_id == current_user.id)
         .order_by(Match.compatibility_score.desc())
+        .limit(TOP_N)
     )
     caches = result.scalars().all()
 
@@ -42,22 +44,36 @@ async def list_matches(
 
     from app.schemas.matches import DimensionScore
 
-    matches = []
+    # Build (cache, summary) pairs preserving pool order (score desc)
+    pairs: list[tuple[Match, MatchSummary]] = []
     for cache in caches:
         user = users_by_id.get(cache.matched_user_id)
         if not user:
             continue
-        matches.append(
+        pairs.append((
+            cache,
             MatchSummary(
                 id=user.id,
                 name=user.name,
                 age=user.age,
                 compatibility_score=cache.compatibility_score,
                 top_dimensions=[DimensionScore(**d) for d in cache.dimension_scores],
-            )
-        )
+            ),
+        ))
 
-    return matches
+    # Fewer than the visible cap — return all, no split needed
+    if len(pairs) <= MAX_VISIBLE_MATCHES:
+        return [s for _, s in pairs]
+
+    # 4 core matches: top 4 by compatibility score, untouched
+    core = [s for _, s in pairs[: MAX_VISIBLE_MATCHES - 1]]
+
+    # 1 discovery match: from positions 5–20, surface whoever has waited longest
+    # (oldest first_matched_at = has been in pool without visibility the longest)
+    candidate_pool = pairs[MAX_VISIBLE_MATCHES - 1 :]
+    _, discovery_summary = min(candidate_pool, key=lambda p: p[0].first_matched_at)
+
+    return core + [discovery_summary]
 
 
 @router.get("/{match_user_id}", response_model=MatchDetail)

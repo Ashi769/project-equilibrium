@@ -18,11 +18,16 @@ from app.schemas.matches import MatchSummary, MatchDetail, DimensionScore
 NEUROTICISM_PENALTY_THRESHOLD = 0.75  # Both users above this → penalize
 NEUROTICISM_PENALTY = 0.15
 TOP_N = 20
+MAX_VISIBLE_MATCHES = 5  # Cap shown to user; prevents choice overload
 
 # Matching weight distribution
 WEIGHT_SEMANTIC = 0.55  # aspiration_A vs identity_B
 WEIGHT_LINGUISTIC = 0.25  # communication style similarity
 WEIGHT_OCEAN = 0.20  # OCEAN dimension similarity
+
+# Rescue pass — floor guarantee for stranded users
+RESCUE_MIN_FLOOR = 2    # minimum pools a user must appear in before rescue stops
+RESCUE_SCORE_FLOOR = 0.25  # minimum score to qualify for rescue injection
 
 
 FOOD_COMPATIBILITY = {
@@ -140,34 +145,28 @@ def _meets_bidirectional_filters(user: User, candidate: User) -> bool:
     return True
 
 
-async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
-    # Fetch current user's profile
-    result = await db.execute(
-        select(PsychometricProfile).where(PsychometricProfile.user_id == user.id)
-    )
-    my_profile = result.scalar_one_or_none()
+def _build_preference_conditions(user: User) -> list:
+    """SQL WHERE conditions for hard preference filters only.
 
-    if not my_profile or my_profile.aspiration_vector is None:
-        return []
-
+    Covers gender, age, wants_children, religion, drinking, smoking, food —
+    all bidirectional. Excludes operational filters (meeting history, cooldown)
+    so this can be reused for both normal matching and rescue feasibility checks.
+    """
     import json as _json
 
     hard_filters = user.hard_filters or {}
     seeking_genders = hard_filters.get("seeking_gender", [])
     max_age_diff = hard_filters.get("max_age_diff")
 
-    # Build hard filter conditions
     conditions = [
         PsychometricProfile.user_id != user.id,
         PsychometricProfile.analysis_status == AnalysisStatus.complete,
         PsychometricProfile.identity_vector.is_not(None),
     ]
 
-    # Gender filter — SQL level, bidirectional
-    # A: candidate's gender must be one I'm seeking
+    # Gender — bidirectional
     if seeking_genders:
         conditions.append(User.gender.in_(seeking_genders))
-    # B: candidate must want my gender (or have no preference set / empty list)
     if user.gender:
         conditions.append(
             text(
@@ -176,33 +175,13 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
             ).bindparams(my_gender_json=_json.dumps([user.gender]))
         )
 
-    # Age filter
+    # Age
     if max_age_diff and user.age:
         conditions.append(
             User.age.between(user.age - max_age_diff, user.age + max_age_diff)
         )
 
-    # Exclude users who have any meeting history with current user
-    meeting_exists = exists().where(
-        or_(
-            and_(Meeting.proposer_id == user.id, Meeting.match_id == User.id),
-            and_(Meeting.proposer_id == User.id, Meeting.match_id == user.id),
-        ),
-    )
-    conditions.append(~meeting_exists)
-
-    # Cooldown: exclude candidates matched within the last MATCH_COOLDOWN_DAYS
-    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(days=MATCH_COOLDOWN_DAYS)
-    recently_matched = exists().where(
-        and_(
-            Match.user_id == user.id,
-            Match.matched_user_id == User.id,
-            Match.first_matched_at > cooldown_cutoff,
-        )
-    )
-    conditions.append(~recently_matched)
-
-    # wants_children hard filter
+    # wants_children
     my_wants_children = hard_filters.get("wants_children")
     if my_wants_children is not None:
         conditions.append(
@@ -212,12 +191,10 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
             )
         )
 
-    # Religion filter — SQL level, bidirectional
-    # A: candidate's religion must match what I'm seeking
+    # Religion — bidirectional
     my_seeking_religion = hard_filters.get("seeking_religion")
     if user.religion and my_seeking_religion and my_seeking_religion != "doesn't matter":
         conditions.append(User.religion == my_seeking_religion)
-    # B: candidate either has no religion preference or wants my religion
     if user.religion:
         conditions.append(
             or_(
@@ -227,7 +204,7 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
             )
         )
 
-    # Drinking filter — SQL level, bidirectional
+    # Drinking — bidirectional
     my_seeking_drinking = hard_filters.get("seeking_drinking")
     if user.drinking and my_seeking_drinking and my_seeking_drinking != "doesn't matter":
         conditions.append(User.drinking == my_seeking_drinking)
@@ -240,7 +217,7 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
             )
         )
 
-    # Smoking filter — SQL level, bidirectional
+    # Smoking — bidirectional
     my_seeking_smoking = hard_filters.get("seeking_smoking")
     if user.smoking and my_seeking_smoking and my_seeking_smoking != "doesn't matter":
         conditions.append(User.smoking == my_seeking_smoking)
@@ -253,15 +230,12 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
             )
         )
 
-    # Food filter — SQL level, bidirectional with compatibility matrix
+    # Food — bidirectional with compatibility matrix
     my_seeking_food = hard_filters.get("seeking_food")
     my_food = user.food_preference
-    # A: candidate's food must be compatible with what I eat
     if my_food and my_seeking_food and my_seeking_food != "doesn't matter":
         my_compatible = FOOD_COMPATIBILITY.get(my_food, [my_food])
         conditions.append(User.food_preference.in_(my_compatible))
-    # B: candidate either has no food preference or their compatible list accepts my food
-    #    Reverse-map: which food types have a compatible list that includes my_food?
     if my_food:
         reverse_compatible = [f for f, compat in FOOD_COMPATIBILITY.items() if my_food in compat]
         conditions.append(
@@ -271,6 +245,59 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
                 User.food_preference.in_(reverse_compatible),
             )
         )
+
+    return conditions
+
+
+async def count_hard_filter_candidates(user: User, db: AsyncSession) -> int:
+    """Count how many users pass user's hard preference filters (no vectors, no cooldown).
+
+    Used by the rescue pass to distinguish infeasible filters (0 result → flag for
+    human review) from a scoring/density problem (>0 result → keep boosting).
+    """
+    from sqlalchemy import func
+
+    conditions = _build_preference_conditions(user)
+    result = await db.execute(
+        select(func.count())
+        .select_from(User)
+        .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
+        .where(and_(*conditions))
+    )
+    return result.scalar() or 0
+
+
+async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
+    # Fetch current user's profile
+    result = await db.execute(
+        select(PsychometricProfile).where(PsychometricProfile.user_id == user.id)
+    )
+    my_profile = result.scalar_one_or_none()
+
+    if not my_profile or my_profile.aspiration_vector is None:
+        return []
+
+    # Preference-based hard filters (reused from _build_preference_conditions)
+    conditions = _build_preference_conditions(user)
+
+    # Operational filters — meeting history and cooldown are not user preferences
+    meeting_exists = exists().where(
+        or_(
+            and_(Meeting.proposer_id == user.id, Meeting.match_id == User.id),
+            and_(Meeting.proposer_id == User.id, Meeting.match_id == user.id),
+        ),
+    )
+    conditions.append(~meeting_exists)
+
+    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(days=MATCH_COOLDOWN_DAYS)
+    recently_matched = exists().where(
+        and_(
+            Match.user_id == user.id,
+            Match.matched_user_id == User.id,
+            Match.first_matched_at > cooldown_cutoff,
+        )
+    )
+    conditions.append(~recently_matched)
 
     raw_vec = my_profile.aspiration_vector
     if hasattr(raw_vec, "tolist"):

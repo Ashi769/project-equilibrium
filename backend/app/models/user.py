@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, JSON, DateTime, Text
+from sqlalchemy import String, Integer, JSON, DateTime, Text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
@@ -32,6 +32,10 @@ class User(Base):
 
     hard_filters: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     last_matched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rescue_flagged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    rescue_flagged_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(

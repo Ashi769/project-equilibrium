@@ -247,4 +247,114 @@ async def _refresh_daily_matches():
                     pass
             await db.commit()
 
+    await _run_rescue_pass(Session)
     await engine.dispose()
+
+
+async def _run_rescue_pass(Session) -> None:
+    """Guarantee every user with a complete profile appears in at least RESCUE_MIN_FLOOR pools.
+
+    Runs after the main nightly batch so all pools are settled before we check
+    who was left out. Two outcomes for a stranded user:
+      - hard_filter_candidates == 0 → preferences are infeasible, flag for human review
+      - hard_filter_candidates  > 0 → inject into the best compatible hosts we can find
+    """
+    import uuid
+    from sqlalchemy import select, and_, delete
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.models.match import Match
+    from app.models.user import User
+    from app.models.psychometric import PsychometricProfile, AnalysisStatus
+    from app.services.matching_service import (
+        count_hard_filter_candidates,
+        get_matches,
+        TOP_N,
+        RESCUE_MIN_FLOOR,
+        RESCUE_SCORE_FLOOR,
+    )
+
+    # Find users with complete profiles that don't appear in any match pool
+    async with Session() as db:
+        exposed_subq = select(Match.matched_user_id).distinct().scalar_subquery()
+        result = await db.execute(
+            select(User.id)
+            .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
+            .where(
+                PsychometricProfile.analysis_status == AnalysisStatus.complete,
+                PsychometricProfile.identity_vector.is_not(None),
+                User.id.not_in(exposed_subq),
+            )
+        )
+        stranded_ids = [row[0] for row in result.all()]
+
+    for user_id in stranded_ids:
+        async with Session() as db:
+            user_v = await db.get(User, user_id)
+            if not user_v:
+                continue
+
+            candidate_count = await count_hard_filter_candidates(user_v, db)
+
+            if candidate_count == 0:
+                # Hard filters eliminate everyone — flag for human review
+                user_v.rescue_flagged = True
+                user_v.rescue_flagged_at = datetime.now(timezone.utc)
+                await db.commit()
+                continue
+
+            # Get V's outbound matches — these are bidirectionally filter-verified hosts
+            outbound = await get_matches(user_v, db)
+            if not outbound:
+                continue
+
+            injection_count = 0
+            now = datetime.now(timezone.utc)
+
+            for host_match in outbound:
+                if injection_count >= RESCUE_MIN_FLOOR:
+                    break
+                if host_match.compatibility_score < RESCUE_SCORE_FLOOR:
+                    break
+
+                # Skip if V is already in this host's cache
+                already_cached = (await db.execute(
+                    select(Match).where(
+                        Match.user_id == host_match.id,
+                        Match.matched_user_id == user_v.id,
+                    )
+                )).scalar_one_or_none()
+                if already_cached:
+                    injection_count += 1
+                    continue
+
+                # Check host's cache capacity
+                host_caches = (await db.execute(
+                    select(Match)
+                    .where(Match.user_id == host_match.id)
+                    .order_by(Match.compatibility_score.asc())
+                )).scalars().all()
+
+                evict_id = None
+                if len(host_caches) < TOP_N:
+                    pass  # room available
+                elif host_caches[0].compatibility_score < host_match.compatibility_score:
+                    evict_id = host_caches[0].id
+                else:
+                    continue  # host's cache is full with better-scoring matches
+
+                if evict_id:
+                    await db.execute(delete(Match).where(Match.id == evict_id))
+
+                await db.execute(
+                    pg_insert(Match).values({
+                        "id": str(uuid.uuid4()),
+                        "user_id": host_match.id,
+                        "matched_user_id": user_v.id,
+                        "compatibility_score": host_match.compatibility_score,
+                        "dimension_scores": [d.model_dump() for d in host_match.top_dimensions],
+                        "computed_at": now,
+                        "first_matched_at": now,
+                    }).on_conflict_do_nothing()
+                )
+                await db.commit()
+                injection_count += 1
