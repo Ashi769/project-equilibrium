@@ -7,14 +7,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
 
 const TOTAL_SECONDS = 30 * 60;
-const FIRST_PROMPT_MS = 3 * 60 * 1000;   // first prompt at 3 min
-const PROMPT_INTERVAL_MS = 4.5 * 60 * 1000; // then every 4.5 min → 6 prompts across 30 min
+const FIRST_PROMPT_MS = 3 * 60 * 1000;
+const PROMPT_INTERVAL_MS = 4.5 * 60 * 1000;
 const MAX_PROMPTS = 6;
 
 const WS_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/^http/, "ws") ?? "ws://localhost:8000";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-// One focused prompt per OCEAN dimension — topic only, no scores exposed
 const DIMENSION_PROMPTS: Record<string, string> = {
   openness:          "What's a belief you've each changed significantly in the last few years?",
   conscientiousness: "How do you approach long-term goals — and what would you want from a partner in that?",
@@ -29,7 +28,7 @@ const FALLBACK_PROMPTS = [
   "What's something you'd need a partner to understand about you early on?",
   "How do you each think about financial partnership?",
   "What role does shared ambition play in a relationship for you?",
-  "Discuss your ideal living arrangement in the next few years.",
+  "Describe your ideal living arrangement in the next few years.",
 ];
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -70,7 +69,6 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
     let ws: WebSocket;
 
     async function init() {
-      // 1. Get media — try combined first, then each track separately
       let stream: MediaStream | null = null;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -94,7 +92,6 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         localVideoRef.current.srcObject = stream;
       }
 
-      // 2. Create peer connection
       pc = new RTCPeerConnection({
         iceServers: ICE_SERVERS,
         iceTransportPolicy: "all",
@@ -103,33 +100,12 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
 
       pcRef.current = pc;
 
-      // Single remote MediaStream that accumulates all incoming tracks.
-      // Set srcObject once here so the <video> element is always wired to it.
       const remoteStream = new MediaStream();
       remoteStreamRef.current = remoteStream;
       const remoteEl = remoteVideoRef.current;
       if (remoteEl) {
         remoteEl.srcObject = remoteStream;
       }
-
-      // ── NOTE: we do NOT add any transceivers here. ──────────────────────────
-      // Transceivers must be added at the right moment for each role:
-      //
-      //  • OFFERER  – adds transceivers right before createOffer() so its tracks
-      //               appear in the SDP it sends.
-      //
-      //  • ANSWERER – calls setRemoteDescription(offer) first (the browser then
-      //               creates recvonly transceivers for each m-line), and only
-      //               AFTER that calls addTrack() to upgrade those transceivers
-      //               to sendrecv and include its own tracks in the answer.
-      //
-      // Pre-creating transceivers on BOTH sides before knowing the role is the
-      // root cause of the bugs: when the answerer already has sendrecv
-      // transceivers and then calls setRemoteDescription(offer), browsers may
-      // create ADDITIONAL recvonly transceivers for the offer's m-lines. The
-      // answer then goes out as recvonly — the offerer receives nothing back,
-      // ontrack never fires on their side, and they see/hear nothing.
-      // ────────────────────────────────────────────────────────────────────────
 
       pc.ontrack = (e) => {
         if (!remoteStream.getTracks().includes(e.track)) {
@@ -172,7 +148,6 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         }
       };
 
-      // 3. Open signaling WebSocket
       ws = new WebSocket(`${WS_URL}/api/v1/signal/${meetingId}?token=${token}`);
       wsRef.current = ws;
 
@@ -191,9 +166,6 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         });
       }
 
-      // Helper: add local tracks to the PC. Safe to call multiple times (ICE
-      // restart re-enters the offer/answer handlers) — addTrack throws if the
-      // track is already registered, so we guard with getSenders().
       function addLocalTracks() {
         const existingTracks = new Set(pc.getSenders().map(s => s.track));
         const audioTrack = stream?.getAudioTracks()[0] ?? null;
@@ -204,9 +176,6 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
         if (videoTrack && !existingTracks.has(videoTrack)) {
           stream ? pc.addTrack(videoTrack, stream) : pc.addTrack(videoTrack);
         }
-        // Ensure recvonly m-lines exist even when a track is missing (mic/cam
-        // unavailable). This keeps both m-lines in every offer/answer so the
-        // SDP structure never changes mid-call.
         const kinds: RTCRtpCodecParameters["mimeType"][] = [];
         if (!audioTrack) kinds.push("audio" as RTCRtpCodecParameters["mimeType"]);
         if (!videoTrack) kinds.push("video" as RTCRtpCodecParameters["mimeType"]);
@@ -225,7 +194,6 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
           roleRef.current = msg.role;
           if (msg.role === "offerer") {
             handleMessage(async () => {
-              // OFFERER: add tracks first so the offer SDP includes our streams.
               addLocalTracks();
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
@@ -242,19 +210,9 @@ function useWebRTC(meetingId: string | null, token: string | undefined, active: 
 
         if (msg.type === "offer") {
           handleMessage(async () => {
-            // ANSWERER step 1: process the remote offer. The browser creates
-            // recvonly transceivers for each m-line in the offer.
             await pc.setRemoteDescription(new RTCSessionDescription(msg.data));
             hasRemoteDesc.current = true;
-
-            // ANSWERER step 2: add our tracks NOW. addTrack() finds the recvonly
-            // transceivers that setRemoteDescription just created and upgrades
-            // them to sendrecv, so our tracks appear in the answer. Doing this
-            // before setRemoteDescription would leave pre-existing sendrecv
-            // transceivers that the browser might not match with the offer's
-            // m-lines, producing a recvonly answer instead.
             addLocalTracks();
-
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             ws.send(JSON.stringify({ type: "answer", data: pc.localDescription!.toJSON() }));
@@ -349,20 +307,16 @@ export default function MeetPage() {
   const [verdict, setVerdict] = useState<"commit" | "pool" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feed, setFeed] = useState<FeedItem[]>([]);
-  const feedRef = useRef<HTMLDivElement>(null);
 
-  // Personalised prompts built from the match's top OCEAN dimensions
   const promptsRef = useRef<string[]>(FALLBACK_PROMPTS.slice(0, MAX_PROMPTS));
   const promptIdxRef = useRef(0);
 
   const { localVideoRef, remoteVideoRef, connected, micMuted, toggleMic, dispose } = useWebRTC(meetingId, token, callActive);
 
-  // Fetch match dimensions once token is ready — before call starts
   useEffect(() => {
     if (!token || !meetingId) return;
     async function load() {
       try {
-        // 1. Find the other user's ID from the meeting list
         const meetings = await fetch(`${API_URL}/api/v1/schedule`, {
           headers: { Authorization: `Bearer ${token}` },
         }).then(r => r.ok ? r.json() : []);
@@ -371,14 +325,12 @@ export default function MeetPage() {
         const userId = session?.userId as string | undefined;
         const otherUserId = meeting.proposer_id === userId ? meeting.match_id : meeting.proposer_id;
 
-        // 2. Get match detail → dimension_scores (ordered by score desc)
         const detail = await fetch(`${API_URL}/api/v1/matches/${otherUserId}`, {
           headers: { Authorization: `Bearer ${token}` },
         }).then(r => r.ok ? r.json() : null);
 
         if (!detail?.dimension_scores?.length) return;
 
-        // 3. Build ordered prompt list from top dimensions, fill with fallbacks
         const ordered: string[] = [];
         for (const dim of detail.dimension_scores as { label: string }[]) {
           const prompt = DIMENSION_PROMPTS[dim.label.toLowerCase()];
@@ -395,7 +347,6 @@ export default function MeetPage() {
     load();
   }, [token, meetingId, session?.userId]);
 
-  // Timer
   useEffect(() => {
     if (!callActive || callEnded) return;
     const id = setInterval(() => {
@@ -412,7 +363,6 @@ export default function MeetPage() {
     return () => clearInterval(id);
   }, [callActive, callEnded, dispose]);
 
-  // Prompt scheduler: first at 3 min, then every 4.5 min — max 6 total
   useEffect(() => {
     if (!callActive || callEnded) return;
     promptIdxRef.current = 0;
@@ -453,178 +403,218 @@ export default function MeetPage() {
   const isUrgent = seconds <= 60;
   const pctLeft = seconds / TOTAL_SECONDS;
 
+  // Verdict screens
   if (verdict === "commit") {
-    return <VerdictScreen headline="Committed" sub="Equilibrium will coordinate next steps with both parties." accent="var(--accent)" onContinue={() => router.push("/selection")} ctaLabel="Return to Selection" />;
+    return <VerdictScreen headline="It's a match" sub="Equilibrium will coordinate next steps with both of you." cta="Back to home" onContinue={() => router.push("/selection")} positive />;
   }
   if (verdict === "pool") {
-    return <VerdictScreen headline="Returned to Pool" sub="Your profile remains active. A new selection will be presented within 48 hours." accent="var(--muted)" onContinue={() => router.push("/selection")} ctaLabel="Return to Selection" />;
+    return <VerdictScreen headline="Back to the pool" sub="Your profile stays active. A new match will be presented within 48 hours." cta="Back to home" onContinue={() => router.push("/selection")} positive={false} />;
   }
 
+  // Post-call verdict prompt
   if (callEnded) {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 flex flex-col items-center justify-center gap-10 text-center px-8" style={{ background: "var(--bg)" }}>
-        <div>
-          <p className="text-xs tracking-[0.25em] uppercase mb-3" style={{ color: "var(--muted)" }}>Session Complete</p>
-          <h2 className="serif font-normal" style={{ fontSize: "3rem", color: "var(--fg)", lineHeight: 1.1 }}>Deliver Your Verdict</h2>
-          <p className="text-sm mt-4 max-w-sm mx-auto" style={{ color: "var(--muted)", lineHeight: 1.7 }}>
-            Based on your 30-minute session, do you wish to pursue a deeper connection or return to the candidate pool?
-          </p>
-        </div>
-        <div className="flex gap-4">
-          <button onClick={() => submitVerdict("commit")} disabled={submitting} className="px-10 py-4 text-sm tracking-[0.15em] uppercase font-medium transition-all" style={{ background: "var(--accent)", color: "#121212", opacity: submitting ? 0.6 : 1 }}>
-            {submitting ? "Submitting..." : "Commit"}
-          </button>
-          <button onClick={() => submitVerdict("pool")} disabled={submitting} className="px-10 py-4 text-sm tracking-[0.15em] uppercase font-medium transition-all" style={{ border: "1px solid var(--border)", color: "var(--muted)", background: "transparent", opacity: submitting ? 0.6 : 1 }}>
-            Return to Pool
-          </button>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 flex flex-col items-center justify-center px-6 text-center"
+        style={{ background: "#0a0a0a" }}
+      >
+        <div className="w-full max-w-sm space-y-8">
+          <div className="space-y-3">
+            <p className="text-sm" style={{ color: "rgba(255,255,255,0.45)" }}>Session complete — 30 minutes</p>
+            <h2 className="font-heading text-3xl font-bold" style={{ color: "#ffffff" }}>How did it go?</h2>
+            <p className="text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.6)" }}>
+              Would you like to pursue this connection, or return to the candidate pool?
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => submitVerdict("commit")}
+              disabled={submitting}
+              className="w-full py-4 text-base font-semibold rounded-2xl transition-all active:scale-95"
+              style={{
+                background: submitting ? "rgba(255,255,255,0.1)" : "#ff4d4d",
+                color: "#ffffff",
+                opacity: submitting ? 0.6 : 1,
+              }}
+            >
+              {submitting ? "Submitting…" : "I want to connect"}
+            </button>
+            <button
+              onClick={() => submitVerdict("pool")}
+              disabled={submitting}
+              className="w-full py-4 text-base font-medium rounded-2xl transition-all active:scale-95"
+              style={{
+                background: "rgba(255,255,255,0.08)",
+                color: "rgba(255,255,255,0.7)",
+                opacity: submitting ? 0.6 : 1,
+              }}
+            >
+              Return to pool
+            </button>
+          </div>
         </div>
       </motion.div>
     );
   }
 
+  // Pre-call screen
   if (!callActive) {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 flex flex-col items-center justify-center gap-8 text-center" style={{ background: "var(--bg)" }}>
-        <div className="w-16 h-16 flex items-center justify-center serif text-2xl" style={{ border: "1px solid var(--accent)", color: "var(--accent)" }}>⚖</div>
-        <div>
-          <h2 className="serif text-3xl font-normal" style={{ color: "var(--fg)" }}>30-Minute Session</h2>
-          <p className="text-sm mt-2 max-w-xs" style={{ color: "var(--muted)" }}>
-            Your camera and microphone will be requested. The session terminates automatically at 30:00.
-          </p>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 flex flex-col items-center justify-center px-6 text-center"
+        style={{ background: "#0a0a0a" }}
+      >
+        <div className="w-full max-w-xs space-y-8">
+          <div
+            className="w-16 h-16 mx-auto flex items-center justify-center text-2xl rounded-2xl"
+            style={{ background: "rgba(255,77,77,0.15)", border: "1px solid rgba(255,77,77,0.3)" }}
+          >
+            ⚖
+          </div>
+          <div className="space-y-3">
+            <h2 className="font-heading text-2xl font-bold" style={{ color: "#ffffff" }}>30-Minute Session</h2>
+            <p className="text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.55)" }}>
+              Camera and mic will be requested. The session ends automatically at 30:00 — conversation prompts appear along the way.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              try {
+                const ctx = new AudioContext();
+                ctx.resume().then(() => ctx.close()).catch(() => {});
+              } catch (_) {}
+              setCallActive(true);
+            }}
+            className="w-full py-4 text-base font-semibold rounded-2xl transition-all active:scale-95"
+            style={{ background: "#ff4d4d", color: "#ffffff" }}
+          >
+            Begin session
+          </button>
         </div>
-        <button onClick={() => {
-          // Resume an AudioContext during this user gesture so the browser
-          // grants audio autoplay permission for the rest of the session.
-          try {
-            const ctx = new AudioContext();
-            ctx.resume().then(() => ctx.close()).catch(() => {});
-          } catch (_) {}
-          setCallActive(true);
-        }} className="px-10 py-4 text-sm tracking-[0.15em] uppercase font-medium" style={{ background: "var(--accent)", color: "#121212" }}>
-          Begin Session
-        </button>
       </motion.div>
     );
   }
 
+  // Active call
   return (
-    <div className="fixed inset-0 flex flex-col" style={{ background: "#0a0a0a" }}>
-      <div className="absolute top-0 left-0 right-0 h-0.5 transition-all duration-1000 z-10" style={{ width: `${pctLeft * 100}%`, background: isUrgent ? "var(--red)" : "var(--accent)" }} />
+    <div className="fixed inset-0 flex flex-col" style={{ background: "#000" }}>
+      {/* Progress bar */}
+      <div
+        className="absolute top-0 left-0 h-0.5 transition-all duration-1000 z-30"
+        style={{
+          width: `${pctLeft * 100}%`,
+          background: isUrgent ? "#ef4444" : "rgba(255,255,255,0.4)",
+        }}
+      />
+
+      {/* Remote video — full screen */}
+      <video
+        ref={remoteVideoRef}
+        autoPlay
+        playsInline
+        className="absolute inset-0 w-full h-full object-cover"
+      />
+
+      {/* Waiting overlay */}
+      {!connected && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center" style={{ background: "#111" }}>
+          <div className="text-center space-y-4">
+            <div
+              className="w-10 h-10 mx-auto rounded-full animate-spin"
+              style={{ border: "2px solid rgba(255,255,255,0.1)", borderTopColor: "rgba(255,255,255,0.6)" }}
+            />
+            <p className="text-sm" style={{ color: "rgba(255,255,255,0.45)" }}>Waiting for your match…</p>
+          </div>
+        </div>
+      )}
 
       {/* Timer — top center */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-5 py-2 flex items-center gap-3" style={{ border: `1px solid ${isUrgent ? "var(--red)" : "var(--border)"}`, background: "rgba(10,10,10,0.9)" }}>
-        <div className="w-1.5 h-1.5" style={{ background: isUrgent ? "var(--red)" : "var(--accent)" }} />
-        <span className="font-mono text-lg tracking-widest" style={{ color: isUrgent ? "var(--red)" : "var(--fg)", fontVariantNumeric: "tabular-nums" }}>
-          {String(mins).padStart(2, "0")}:{String(secs).padStart(2, "0")}
-        </span>
-      </div>
-
-
-      {/* Bottom controls */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3">
-        {/* Mic toggle */}
-        <button
-          onClick={toggleMic}
-          title={micMuted ? "Unmute mic" : "Mute mic"}
-          className="w-11 h-11 flex items-center justify-center transition-colors"
-          style={{
-            border: `1px solid ${micMuted ? "#ef4444" : "var(--border)"}`,
-            background: micMuted ? "rgba(239,68,68,0.15)" : "rgba(10,10,10,0.85)",
-            backdropFilter: "blur(8px)",
-            color: micMuted ? "#ef4444" : "var(--muted)",
-          }}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+        <div
+          className="px-4 py-2 rounded-full flex items-center gap-2"
+          style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(12px)" }}
         >
-          {micMuted ? (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="1" y1="1" x2="23" y2="23"/>
-              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
-              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
-              <line x1="12" y1="19" x2="12" y2="23"/>
-              <line x1="8" y1="23" x2="16" y2="23"/>
-            </svg>
-          ) : (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-              <line x1="12" y1="19" x2="12" y2="23"/>
-              <line x1="8" y1="23" x2="16" y2="23"/>
-            </svg>
-          )}
-        </button>
-
-        {/* End Session */}
-        <button
-          onClick={() => { setCallEnded(true); dispose(); }}
-          className="px-6 py-3 text-xs tracking-[0.1em] uppercase font-medium transition-colors"
-          style={{ border: "1px solid #ef4444", color: "#ef4444", background: "rgba(239,68,68,0.15)", backdropFilter: "blur(8px)" }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "#ef4444"; e.currentTarget.style.color = "#fff"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.15)"; e.currentTarget.style.color = "#ef4444"; }}
-        >
-          End Session
-        </button>
-      </div>
-
-      <div className="flex-1 relative" style={{ flex: 1, minHeight: 0, height: "calc(100vh - 50px)" }}>
-        {/* Remote video — full screen */}
-        <video 
-          ref={remoteVideoRef} 
-          autoPlay 
-          playsInline
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ width: "100%", height: "100%" }}
-        />
-        {!connected && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ background: "#0f0e0c" }}>
-            <div className="text-center">
-              <div className="w-12 h-12 mx-auto mb-4 flex items-center justify-center">
-                <div className="w-full h-full animate-spin" style={{ border: "1px solid var(--border)", borderTopColor: "var(--accent)" }} />
-              </div>
-              <p className="text-xs tracking-widest uppercase" style={{ color: "var(--dim)" }}>Waiting for match to join...</p>
-            </div>
-          </div>
-        )}
-
-        {/* Local video — PIP bottom-left */}
-        <div className="absolute bottom-20 left-4 z-10 overflow-hidden" style={{ width: 180, height: 135, border: "1px solid var(--border)", background: "#000" }}>
-          <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />
-          <div className="absolute bottom-1 right-2 text-xs" style={{ color: "var(--muted)", textShadow: "0 0 4px #000" }}>You</div>
+          <div
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ background: isUrgent ? "#ef4444" : "rgba(255,255,255,0.5)" }}
+          />
+          <span
+            className="font-mono text-base tabular-nums"
+            style={{ color: isUrgent ? "#ef4444" : "#ffffff" }}
+          >
+            {String(mins).padStart(2, "0")}:{String(secs).padStart(2, "0")}
+          </span>
         </div>
+      </div>
 
-        {/* Conversation Guide — bottom-right */}
-        <div className="absolute bottom-20 right-4 w-72 z-10" style={{ border: "1px solid var(--border)", background: "rgba(10,10,10,0.92)", backdropFilter: "blur(8px)" }}>
-          <div className="px-3 py-2 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)" }}>
-            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5" style={{ background: "var(--accent)" }} />
-              <span className="text-xs tracking-[0.15em] uppercase" style={{ color: "var(--accent)" }}>Guide</span>
-            </div>
-            {feed.length > 0 && (
-              <span className="text-xs" style={{ color: "var(--dim)" }}>{feed.length} / {MAX_PROMPTS}</span>
-            )}
-          </div>
+      {/* Local video PIP — top right */}
+      <div
+        className="absolute top-4 right-4 z-20 overflow-hidden rounded-xl"
+        style={{
+          width: 100,
+          height: 75,
+          border: "1.5px solid rgba(255,255,255,0.2)",
+          background: "#000",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+        }}
+      >
+        <video
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-cover"
+          style={{ transform: "scaleX(-1)" }}
+        />
+      </div>
 
+      {/* Bottom panel: prompt + controls */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 flex flex-col" style={{ paddingBottom: "env(safe-area-inset-bottom, 16px)" }}>
+        {/* Conversation prompt */}
+        <div
+          className="mx-3 mb-3 rounded-2xl overflow-hidden"
+          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)" }}
+        >
           <AnimatePresence mode="wait">
             {feed.length === 0 ? (
-              <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="px-4 py-4">
-                <p className="text-xs italic leading-relaxed" style={{ color: "var(--dim)" }}>
-                  A conversation prompt will appear at 3 minutes.
+              <motion.div
+                key="idle"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="px-4 py-3 flex items-center gap-2"
+              >
+                <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "rgba(255,255,255,0.25)" }} />
+                <p className="text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>
+                  First prompt at 3 min
                 </p>
               </motion.div>
             ) : (
               <motion.div
                 key={feed.length}
-                initial={{ opacity: 0, y: 6 }}
+                initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.4 }}
-                className="px-4 py-4"
+                transition={{ duration: 0.35 }}
+                className="px-4 py-3 space-y-2"
               >
-                <p className="text-sm leading-relaxed" style={{ color: "var(--fg)", lineHeight: 1.6 }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
+                    Prompt {feed.length} of {MAX_PROMPTS}
+                  </span>
+                </div>
+                <p className="text-sm leading-relaxed" style={{ color: "#ffffff" }}>
                   {feed[feed.length - 1].text}
                 </p>
                 {feed.length > 1 && (
-                  <div className="mt-3 pt-3 space-y-1" style={{ borderTop: "1px solid var(--border)" }}>
-                    {feed.slice(0, -1).map((item, i) => (
-                      <p key={i} className="text-xs leading-snug" style={{ color: "var(--dim)" }}>
+                  <div className="pt-2 space-y-1" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                    {feed.slice(0, -1).reverse().slice(0, 2).map((item, i) => (
+                      <p key={i} className="text-xs leading-snug" style={{ color: "rgba(255,255,255,0.3)" }}>
                         {item.text}
                       </p>
                     ))}
@@ -634,21 +624,98 @@ export default function MeetPage() {
             )}
           </AnimatePresence>
         </div>
+
+        {/* Controls row */}
+        <div className="px-3 pb-4 flex items-center justify-center gap-3">
+          {/* Mic toggle */}
+          <button
+            onClick={toggleMic}
+            className="w-14 h-14 flex items-center justify-center rounded-full transition-all active:scale-90"
+            style={{
+              background: micMuted ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.12)",
+              border: `1.5px solid ${micMuted ? "rgba(239,68,68,0.6)" : "rgba(255,255,255,0.2)"}`,
+              backdropFilter: "blur(8px)",
+              color: micMuted ? "#ef4444" : "#ffffff",
+            }}
+            title={micMuted ? "Unmute" : "Mute"}
+          >
+            {micMuted ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="1" y1="1" x2="23" y2="23"/>
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            )}
+          </button>
+
+          {/* End session */}
+          <button
+            onClick={() => { setCallEnded(true); dispose(); }}
+            className="h-14 px-6 flex items-center gap-2 rounded-full text-sm font-semibold transition-all active:scale-90"
+            style={{
+              background: "rgba(239,68,68,0.2)",
+              border: "1.5px solid rgba(239,68,68,0.5)",
+              backdropFilter: "blur(8px)",
+              color: "#ef4444",
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.42 19.42 0 0 1 3.07 8.63 19.79 19.79 0 0 1 0 0a2 2 0 0 1 2-2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L6.18 5.71"/>
+              <line x1="23" y1="1" x2="1" y2="23"/>
+            </svg>
+            End
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function VerdictScreen({ headline, sub, accent, onContinue, ctaLabel }: {
-  headline: string; sub: string; accent: string; onContinue: () => void; ctaLabel: string;
+function VerdictScreen({ headline, sub, cta, onContinue, positive }: {
+  headline: string;
+  sub: string;
+  cta: string;
+  onContinue: () => void;
+  positive: boolean;
 }) {
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="fixed inset-0 flex flex-col items-center justify-center gap-8 text-center px-8" style={{ background: "var(--bg)" }}>
-      <h2 className="serif font-normal" style={{ fontSize: "4rem", color: accent, lineHeight: 1 }}>{headline}</h2>
-      <p className="text-sm max-w-sm" style={{ color: "var(--muted)", lineHeight: 1.8 }}>{sub}</p>
-      <button onClick={onContinue} className="px-8 py-3 text-xs tracking-[0.2em] uppercase transition-all" style={{ border: "1px solid var(--border)", color: "var(--muted)" }}>
-        {ctaLabel}
-      </button>
+    <motion.div
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="fixed inset-0 flex flex-col items-center justify-center px-6 text-center"
+      style={{ background: "#0a0a0a" }}
+    >
+      <div className="w-full max-w-xs space-y-6">
+        <div
+          className="w-16 h-16 mx-auto flex items-center justify-center text-2xl rounded-2xl"
+          style={{
+            background: positive ? "rgba(255,77,77,0.15)" : "rgba(255,255,255,0.06)",
+            border: `1px solid ${positive ? "rgba(255,77,77,0.3)" : "rgba(255,255,255,0.12)"}`,
+          }}
+        >
+          {positive ? "✓" : "↩"}
+        </div>
+        <div className="space-y-2">
+          <h2 className="font-heading text-2xl font-bold" style={{ color: "#ffffff" }}>{headline}</h2>
+          <p className="text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.55)" }}>{sub}</p>
+        </div>
+        <button
+          onClick={onContinue}
+          className="w-full py-4 text-base font-medium rounded-2xl transition-all active:scale-95"
+          style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)" }}
+        >
+          {cta}
+        </button>
+      </div>
     </motion.div>
   );
 }
