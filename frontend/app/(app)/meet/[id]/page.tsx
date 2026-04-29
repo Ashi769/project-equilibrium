@@ -346,10 +346,15 @@ export default function MeetPage() {
   const [seconds, setSeconds] = useState(TOTAL_SECONDS);
   const [callActive, setCallActive] = useState(false);
   const [callEnded, setCallEnded] = useState(false);
+  const [noShow, setNoShow] = useState(false);      // match never connected
+  const [matchDropped, setMatchDropped] = useState(false); // was connected, then left
   const [verdict, setVerdict] = useState<"commit" | "pool" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feed, setFeed] = useState<FeedItem[]>([]);
-  const feedRef = useRef<HTMLDivElement>(null);
+
+  // Track whether we ever had a live WebRTC connection this session
+  const hadConnectionRef = useRef(false);
+  const wasConnectedRef = useRef(false);
 
   // Personalised prompts built from the match's top OCEAN dimensions
   const promptsRef = useRef<string[]>(FALLBACK_PROMPTS.slice(0, MAX_PROMPTS));
@@ -395,6 +400,33 @@ export default function MeetPage() {
     load();
   }, [token, meetingId, session?.userId]);
 
+  // Track live connection state to detect no-show and mid-call drops
+  useEffect(() => {
+    if (!callActive) return;
+    if (connected) {
+      hadConnectionRef.current = true;
+      wasConnectedRef.current = true;
+      setMatchDropped(false);
+    } else if (wasConnectedRef.current) {
+      // Was connected and now isn't — match dropped mid-call
+      wasConnectedRef.current = false;
+      setMatchDropped(true);
+    }
+  }, [connected, callActive]);
+
+  // No-join timeout: if nobody connects within 5 min, end gracefully as no-show
+  useEffect(() => {
+    if (!callActive || callEnded) return;
+    const t = setTimeout(() => {
+      if (!hadConnectionRef.current) {
+        dispose();
+        setNoShow(true);
+        setCallEnded(true);
+      }
+    }, 5 * 60 * 1000);
+    return () => clearTimeout(t);
+  }, [callActive, callEnded, dispose]);
+
   // Timer
   useEffect(() => {
     if (!callActive || callEnded) return;
@@ -402,6 +434,8 @@ export default function MeetPage() {
       setSeconds((prev) => {
         if (prev <= 1) {
           clearInterval(id);
+          // Mark no-show if the other person never connected at all
+          if (!hadConnectionRef.current) setNoShow(true);
           setCallEnded(true);
           dispose();
           return 0;
@@ -461,6 +495,27 @@ export default function MeetPage() {
   }
 
   if (callEnded) {
+    // Match never joined — no verdict to give
+    if (noShow) {
+      return (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 text-center px-8" style={{ background: "#0a0a0a" }}>
+          <div className="w-16 h-16 mx-auto flex items-center justify-center text-3xl" style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, background: "rgba(255,255,255,0.05)" }}>
+            🕐
+          </div>
+          <div>
+            <h2 className="serif font-normal" style={{ fontSize: "2.5rem", color: "#ffffff", lineHeight: 1.1 }}>Your match didn't join</h2>
+            <p className="text-sm mt-4 max-w-sm mx-auto" style={{ color: "rgba(255,255,255,0.55)", lineHeight: 1.7 }}>
+              The session window passed without a connection. Equilibrium will follow up with your match and re-present a slot if appropriate.
+            </p>
+          </div>
+          <button onClick={() => router.push("/selection")} className="px-10 py-3 text-xs tracking-[0.15em] uppercase" style={{ border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.6)" }}>
+            Return to Selection
+          </button>
+        </motion.div>
+      );
+    }
+
+    // Normal end — ask for verdict
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-10 text-center px-8" style={{ background: "#0a0a0a" }}>
         <div>
@@ -588,6 +643,14 @@ export default function MeetPage() {
         <div className="absolute top-16 right-4 z-10 overflow-hidden" style={{ width: 120, height: 90, border: "1px solid rgba(255,255,255,0.2)", background: "#000", borderRadius: 8 }}>
           <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />
         </div>
+
+        {/* Match-dropped banner */}
+        {matchDropped && !connected && (
+          <div className="absolute top-16 left-4 right-4 z-20 px-4 py-3 flex items-center gap-3" style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 8 }}>
+            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "#ef4444" }} />
+            <p className="text-sm" style={{ color: "#ffffff" }}>Your match lost connection. Waiting for them to reconnect…</p>
+          </div>
+        )}
 
         {/* Conversation Guide — bottom-right */}
         <div className="absolute bottom-20 right-4 w-72 z-10" style={{ border: "1px solid rgba(255,255,255,0.12)", background: "rgba(10,10,10,0.92)", backdropFilter: "blur(8px)", borderRadius: 8 }}>
