@@ -7,9 +7,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { api } from "@/lib/api";
 
 const TOTAL_SECONDS = 30 * 60;
-const FIRST_PROMPT_MS = 3 * 60 * 1000;   // first prompt at 3 min
-const PROMPT_INTERVAL_MS = 4.5 * 60 * 1000; // then every 4.5 min → 6 prompts across 30 min
+const FIRST_PROMPT_MS = 3 * 60 * 1000;
+const PROMPT_INTERVAL_MS = 4.5 * 60 * 1000;
 const MAX_PROMPTS = 6;
+const NO_JOIN_TIMEOUT_S = 2 * 60; // give up waiting after 2 min
 
 const WS_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/^http/, "ws") ?? "ws://localhost:8000";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -346,8 +347,9 @@ export default function MeetPage() {
   const [seconds, setSeconds] = useState(TOTAL_SECONDS);
   const [callActive, setCallActive] = useState(false);
   const [callEnded, setCallEnded] = useState(false);
-  const [noShow, setNoShow] = useState(false);      // match never connected
-  const [matchDropped, setMatchDropped] = useState(false); // was connected, then left
+  const [noShow, setNoShow] = useState(false);
+  const [matchDropped, setMatchDropped] = useState(false);
+  const [waitingSecondsLeft, setWaitingSecondsLeft] = useState(NO_JOIN_TIMEOUT_S);
   const [verdict, setVerdict] = useState<"commit" | "pool" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feed, setFeed] = useState<FeedItem[]>([]);
@@ -414,18 +416,25 @@ export default function MeetPage() {
     }
   }, [connected, callActive]);
 
-  // No-join timeout: if nobody connects within 5 min, end gracefully as no-show
+  // No-join countdown: tick down and auto-end after NO_JOIN_TIMEOUT_S if nobody ever connects
   useEffect(() => {
-    if (!callActive || callEnded) return;
-    const t = setTimeout(() => {
-      if (!hadConnectionRef.current) {
-        dispose();
-        setNoShow(true);
-        setCallEnded(true);
-      }
-    }, 5 * 60 * 1000);
-    return () => clearTimeout(t);
-  }, [callActive, callEnded, dispose]);
+    if (!callActive || callEnded || hadConnectionRef.current) return;
+    setWaitingSecondsLeft(NO_JOIN_TIMEOUT_S);
+    const id = setInterval(() => {
+      setWaitingSecondsLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(id);
+          dispose();
+          setNoShow(true);
+          setCallEnded(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callActive, callEnded]);
 
   // Timer
   useEffect(() => {
@@ -628,13 +637,25 @@ export default function MeetPage() {
           className="absolute inset-0 w-full h-full object-cover"
           style={{ width: "100%", height: "100%" }}
         />
-        {!connected && (
+        {!connected && !matchDropped && (
           <div className="absolute inset-0 flex items-center justify-center" style={{ background: "#0f0e0c" }}>
-            <div className="text-center">
-              <div className="w-12 h-12 mx-auto mb-4 flex items-center justify-center">
+            <div className="text-center space-y-5">
+              <div className="w-12 h-12 mx-auto flex items-center justify-center">
                 <div className="w-full h-full animate-spin" style={{ border: "1px solid rgba(255,255,255,0.1)", borderTopColor: "rgba(255,255,255,0.6)", borderRadius: "50%" }} />
               </div>
-              <p className="text-xs tracking-widest uppercase" style={{ color: "rgba(255,255,255,0.4)" }}>Waiting for match to join...</p>
+              <div className="space-y-1">
+                <p className="text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>Waiting for your match…</p>
+                <p className="text-xs font-mono" style={{ color: "rgba(255,255,255,0.3)" }}>
+                  Leaving in {String(Math.floor(waitingSecondsLeft / 60)).padStart(2, "0")}:{String(waitingSecondsLeft % 60).padStart(2, "0")} if they don't join
+                </p>
+              </div>
+              <button
+                onClick={() => { dispose(); setNoShow(true); setCallEnded(true); }}
+                className="px-6 py-2 text-xs"
+                style={{ border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.45)", borderRadius: 6 }}
+              >
+                Leave now
+              </button>
             </div>
           </div>
         )}
