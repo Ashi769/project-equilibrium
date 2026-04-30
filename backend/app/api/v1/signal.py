@@ -1,6 +1,7 @@
 import json
 import asyncio
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.security import decode_token
 
@@ -69,6 +70,9 @@ async def signaling(ws: WebSocket, meeting_id: str):
 
     logger.info(f"signal: {user_id[:8]} joined room {meeting_id[:8]}, peers={existing_peers}")
 
+    # Stamp join time on the meeting row for no-show tracking
+    await _stamp_join(meeting_id, user_id)
+
     if existing_peers:
         try:
             await ws.send_json({"type": "peer-joined", "role": "offerer"})
@@ -134,3 +138,42 @@ async def signaling(ws: WebSocket, meeting_id: str):
                 await peer_ws.send_json({"type": "peer-left"})
             except Exception:
                 pass
+
+
+async def _stamp_join(meeting_id: str, user_id: str) -> None:
+    try:
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+        from sqlalchemy import select, update
+        from app.models.schedule import Meeting
+        from app.core.config import settings
+
+        engine = create_async_engine(settings.async_database_url, echo=False)
+        Session = async_sessionmaker(engine, expire_on_commit=False)
+        now = datetime.now(timezone.utc)
+
+        async with Session() as db:
+            result = await db.execute(
+                select(Meeting.proposer_id, Meeting.match_id).where(Meeting.id == meeting_id)
+            )
+            row = result.first()
+            if not row:
+                return
+
+            proposer_id, match_id = row
+            if user_id == proposer_id:
+                col = Meeting.proposer_joined_at
+            elif user_id == match_id:
+                col = Meeting.match_joined_at
+            else:
+                return
+
+            await db.execute(
+                update(Meeting)
+                .where(Meeting.id == meeting_id, col == None)  # noqa: E711
+                .values({col: now})
+            )
+            await db.commit()
+
+        await engine.dispose()
+    except Exception as e:
+        logger.warning(f"signal: failed to stamp join for {user_id[:8]}: {e}")

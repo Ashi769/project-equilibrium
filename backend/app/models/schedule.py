@@ -60,6 +60,14 @@ class Meeting(Base):
     )
     match_notified_commit: Mapped[bool] = mapped_column(default=False, nullable=False)
 
+    proposer_joined_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    match_joined_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    no_show_checked: Mapped[bool] = mapped_column(default=False, nullable=False)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

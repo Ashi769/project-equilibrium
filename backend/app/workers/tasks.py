@@ -384,3 +384,59 @@ async def _run_rescue_pass(Session) -> None:
                 )
                 await db.commit()
                 injection_count += 1
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=120)
+def check_no_shows(self):
+    """Stamp no_show_count for users who missed a confirmed meeting."""
+    try:
+        asyncio.run(_check_no_shows())
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+
+async def _check_no_shows():
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from sqlalchemy import select, update
+    from app.models.schedule import Meeting, MeetingStatus
+    from app.models.user import User
+
+    engine = create_async_engine(settings.async_database_url, echo=False)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(timezone.utc)
+    # Evaluate meetings whose locked slot ended at least 35 min ago
+    window_cutoff = now - timedelta(minutes=35)
+
+    async with Session() as db:
+        result = await db.execute(
+            select(Meeting).where(
+                Meeting.status == MeetingStatus.confirmed,
+                Meeting.locked_slot <= window_cutoff,
+                Meeting.no_show_checked == False,  # noqa: E712
+            )
+        )
+        meetings = result.scalars().all()
+
+        for meeting in meetings:
+            no_show_ids: list[str] = []
+            if meeting.proposer_joined_at is None:
+                no_show_ids.append(meeting.proposer_id)
+            if meeting.match_joined_at is None:
+                no_show_ids.append(meeting.match_id)
+
+            if no_show_ids:
+                await db.execute(
+                    update(User)
+                    .where(User.id.in_(no_show_ids))
+                    .values(no_show_count=User.no_show_count + 1)
+                )
+
+            await db.execute(
+                update(Meeting)
+                .where(Meeting.id == meeting.id)
+                .values(no_show_checked=True)
+            )
+
+        await db.commit()
+
+    await engine.dispose()

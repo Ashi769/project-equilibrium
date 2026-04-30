@@ -25,4 +25,9 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=3, minute=0),
         "options": {"queue": "default"},
     },
+    "no-show-check": {
+        "task": "app.workers.tasks.check_no_shows",
+        "schedule": crontab(minute="*/30"),
+        "options": {"queue": "default"},
+    },
 }
