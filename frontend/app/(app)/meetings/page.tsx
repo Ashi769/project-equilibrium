@@ -21,6 +21,13 @@ interface MeetingResponse {
   created_at: string; is_mutual_match: boolean;
 }
 
+function isExpired(m: MeetingResponse): boolean {
+  const now = new Date();
+  if (m.status === "completed" || m.status === "cancelled") return true;
+  if (m.status === "confirmed") return m.locked_slot ? new Date(m.locked_slot) < now : false;
+  return new Date(m.slot_1) < now && new Date(m.slot_2) < now && new Date(m.slot_3) < now;
+}
+
 function formatSlot(iso: string) {
   const d = new Date(iso);
   return (
@@ -58,13 +65,13 @@ export default function MeetingsPage() {
     );
   }
 
-  const incoming    = meetings.filter((m) => m.match_id === userId && m.status === "proposed");
-  const confirmed   = meetings.filter((m) => m.status === "confirmed");
-  const outgoing    = meetings.filter((m) => m.proposer_id === userId && m.status === "proposed");
-  const connections = meetings.filter((m) => m.is_mutual_match);
-  const past        = meetings.filter((m) => !m.is_mutual_match && (m.status === "completed" || m.status === "cancelled"));
+  const visible     = meetings.filter((m) => !isExpired(m) || m.is_mutual_match);
+  const incoming    = visible.filter((m) => m.match_id === userId && m.status === "proposed");
+  const confirmed   = visible.filter((m) => m.status === "confirmed");
+  const outgoing    = visible.filter((m) => m.proposer_id === userId && m.status === "proposed");
+  const connections = visible.filter((m) => m.is_mutual_match);
 
-  if (meetings.length === 0) {
+  if (visible.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-40 gap-4 text-center">
         <p className="font-heading text-2xl font-bold" style={{ color: "var(--muted)" }}>No meetings yet.</p>
@@ -113,11 +120,6 @@ export default function MeetingsPage() {
         </Section>
       )}
 
-      {past.length > 0 && (
-        <Section title="Past" count={past.length}>
-          {past.map((m) => <PastCard key={m.id} meeting={m} userId={userId!} />)}
-        </Section>
-      )}
     </div>
   );
 }
@@ -395,28 +397,3 @@ function ConnectionCard({ meeting, userId }: { meeting: MeetingResponse; userId:
   );
 }
 
-function PastCard({ meeting, userId }: { meeting: MeetingResponse; userId: string }) {
-  const otherName = meeting.proposer_id === userId ? meeting.match_name : meeting.proposer_name;
-  const myVerdict   = meeting.proposer_id === userId ? meeting.proposer_verdict : meeting.match_verdict;
-  const theirVerdict = meeting.proposer_id === userId ? meeting.match_verdict : meeting.proposer_verdict;
-  const verdictLabel = meeting.is_mutual_match ? "Verdict: Committed ✓" : "Verdict: Didn't work out";
-  return (
-    <div
-      className="p-5 flex items-center justify-between border-2 border-[#e5e0d8] bg-white"
-      style={{ borderRadius: "var(--radius-wobbly-alt)", opacity: 0.55 }}
-    >
-      <div>
-        <p className="font-heading text-lg font-bold" style={{ color: "var(--ink)" }}>{otherName ?? "Match"}</p>
-        <p className="text-sm mt-0.5" style={{ color: "var(--muted)" }}>
-          {verdictLabel}
-        </p>
-      </div>
-      <span
-        className="text-xs font-medium uppercase tracking-wide px-2 py-1 border-2 border-[#e5e0d8]"
-        style={{ borderRadius: "var(--radius-wobbly-sm)", color: "var(--dim)" }}
-      >
-        {meeting.status}
-      </span>
-    </div>
-  );
-}

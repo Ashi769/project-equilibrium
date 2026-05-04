@@ -13,6 +13,7 @@ from app.models.user import User
 from app.models.match import Match
 from app.models.psychometric import PsychometricProfile, AnalysisStatus
 from app.models.schedule import Meeting, MeetingStatus
+from app.models.invitation import Invitation
 from app.schemas.matches import MatchSummary, MatchDetail, DimensionScore
 
 NEUROTICISM_PENALTY_THRESHOLD = 0.75  # Both users above this → penalize
@@ -298,6 +299,15 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
         )
     )
     conditions.append(~recently_matched)
+
+    # Referral exclusion — never match with someone who referred you or whom you referred
+    referral_link = exists().where(
+        or_(
+            and_(Invitation.created_by == User.id, Invitation.used_by == user.id),
+            and_(Invitation.created_by == user.id, Invitation.used_by == User.id),
+        )
+    )
+    conditions.append(~referral_link)
 
     raw_vec = my_profile.aspiration_vector
     if hasattr(raw_vec, "tolist"):
