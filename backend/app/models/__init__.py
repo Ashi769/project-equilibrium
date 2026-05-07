@@ -2,6 +2,7 @@ from app.models.user import User
 from app.models.psychometric import PsychometricProfile, AnalysisStatus
 from app.models.interview import InterviewSession, ProcessingStatus
 from app.models.match import Match
+from app.models.match_candidate import MatchCandidate
 from app.models.photo import UserPhoto
 from app.models.schedule import Meeting, MeetingStatus, VerdictChoice
 
@@ -12,6 +13,7 @@ __all__ = [
     "InterviewSession",
     "ProcessingStatus",
     "Match",
+    "MatchCandidate",
     "UserPhoto",
     "Meeting",
     "MeetingStatus",

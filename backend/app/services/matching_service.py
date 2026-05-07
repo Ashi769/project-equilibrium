@@ -1,163 +1,137 @@
 """
-Matching engine:
-1. Hard filter: SQL WHERE clause (deal-breakers)
-2. Vector similarity: pgvector cosine distance (aspiration_A vs identity_B)
-3. Conflict penalty: reduce score for high-neuroticism pairs
-4. Return top N matches with dimension breakdown
+Matching engine — 2-pass mutual matching algorithm.
+
+Pass 1  (raw scoring):
+  hard-filter SQL → vector similarity → top-K stored in match_candidates
+
+Pass 2  (mutual filter):
+  JOIN match_candidates in both directions → apply operational exclusions
+  → mutual top-N stored in Match (display layer)
+
+Rescue:
+  Users with < RESCUE_MUTUAL_THRESHOLD active mutual matches get injected into
+  compatible users' match_candidates at the start of the next cycle.
+  Rescue rows survive the Pass 1 truncation (is_rescue=True).
 """
 
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text, and_, or_, exists
+from sqlalchemy import select, text, and_, or_, exists, func, update
+from sqlalchemy.orm import aliased
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from app.models.user import User
-from app.models.match import Match
+from app.models.match import Match, MatchStatus
+from app.models.match_candidate import MatchCandidate
 from app.models.psychometric import PsychometricProfile, AnalysisStatus
-from app.models.schedule import Meeting, MeetingStatus
+from app.models.schedule import Meeting
 from app.models.invitation import Invitation
 from app.schemas.matches import MatchSummary, MatchDetail, DimensionScore
 
-NEUROTICISM_PENALTY_THRESHOLD = 0.75  # Both users above this → penalize
-NEUROTICISM_PENALTY = 0.15
-TOP_N = 20
-MAX_VISIBLE_MATCHES = 5  # Cap shown to user; prevents choice overload
+# ── Scoring weights ───────────────────────────────────────────────────────────
+WEIGHT_SEMANTIC   = 0.55
+WEIGHT_LINGUISTIC = 0.25
+WEIGHT_OCEAN      = 0.20
 
-# Matching weight distribution
-WEIGHT_SEMANTIC = 0.55  # aspiration_A vs identity_B
-WEIGHT_LINGUISTIC = 0.25  # communication style similarity
-WEIGHT_OCEAN = 0.20  # OCEAN dimension similarity
+NEUROTICISM_PENALTY_THRESHOLD = 0.75
+NEUROTICISM_PENALTY           = 0.15
 
-# Rescue pass — floor guarantee for stranded users
-RESCUE_MIN_FLOOR = 2    # minimum pools a user must appear in before rescue stops
-RESCUE_SCORE_FLOOR = 0.25  # minimum score to qualify for rescue injection
+# ── Tunable constants ─────────────────────────────────────────────────────────
+PASS1_TOP_K               = 50   # candidates per user stored in Pass 1
+MAX_VISIBLE_MATCHES       = 5    # mutual matches shown to each user
+MATCH_COOLDOWN_DAYS       = 180  # same pair not re-shown within this window
+RESCUE_MUTUAL_THRESHOLD   = 2    # min active matches before rescue triggers
+RESCUE_INJECTION_LIMIT    = 10   # max target users injected per rescue user
+RESCUE_CANDIDATES_PER_TARGET = 1 # max rescue injections per target user
 
+# Legacy aliases kept for callers that import these names
+TOP_N              = MAX_VISIBLE_MATCHES
+RESCUE_MIN_FLOOR   = RESCUE_MUTUAL_THRESHOLD
+RESCUE_SCORE_FLOOR = 0.25
 
 FOOD_COMPATIBILITY = {
-    "vegan": ["vegan"],
-    "veg": ["vegan", "veg"],
-    "egg": ["veg", "egg", "non-veg"],
+    "vegan":   ["vegan"],
+    "veg":     ["vegan", "veg"],
+    "egg":     ["veg", "egg", "non-veg"],
     "non-veg": ["egg", "non-veg"],
 }
 
 
-def _meets_bidirectional_filters(user: User, candidate: User) -> bool:
-    """Check if candidate meets user's preferences AND user meets candidate's preferences."""
-    my_filters = user.hard_filters or {}
-    their_filters = candidate.hard_filters or {}
+# ── Low-level helpers ─────────────────────────────────────────────────────────
 
-    my_gender = user.gender
-    their_gender = candidate.gender
+def _vec_str(vec) -> str:
+    if hasattr(vec, "tolist"):
+        vec = vec.tolist()
+    return "[" + ",".join(str(float(v)) for v in vec) + "]"
 
-    # Gender check: both must want each other's gender
-    if my_gender and their_gender:
-        my_seeking = my_filters.get("seeking_gender")
-        their_seeking = their_filters.get("seeking_gender")
 
-        if their_seeking and my_gender not in their_seeking:
-            return False
-        if my_seeking and their_gender not in my_seeking:
-            return False
+def _ocean_similarity(p1: PsychometricProfile, p2: PsychometricProfile) -> float:
+    o1 = p1.ocean_scores or {}
+    o2 = p2.ocean_scores or {}
+    keys = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+    diffs = [abs(o1.get(k, 0.5) - o2.get(k, 0.5)) for k in keys]
+    return 1.0 - (sum(diffs) / len(diffs))
 
-    # Religion: both must have matching preferences
-    my_religion = user.religion
-    their_religion = candidate.religion
-    my_seeking_religion = my_filters.get("seeking_religion")
-    their_seeking_religion = their_filters.get("seeking_religion")
 
-    if (
-        my_religion
-        and their_religion
-        and my_seeking_religion
-        and my_seeking_religion != "doesn't matter"
-    ):
-        if their_religion != my_seeking_religion:
-            return False
-    if (
-        my_religion
-        and their_religion
-        and their_seeking_religion
-        and their_seeking_religion != "doesn't matter"
-    ):
-        if my_religion != their_seeking_religion:
-            return False
+def _compute_composite_score(
+    my_profile: PsychometricProfile,
+    their_profile: PsychometricProfile,
+    semantic_sim: float,
+    comm_sim: float | None,
+) -> float:
+    linguistic = comm_sim if comm_sim is not None else semantic_sim
+    score = (
+        WEIGHT_SEMANTIC   * semantic_sim
+        + WEIGHT_LINGUISTIC * linguistic
+        + WEIGHT_OCEAN    * _ocean_similarity(my_profile, their_profile)
+    )
+    my_n    = (my_profile.ocean_scores  or {}).get("neuroticism", 0)
+    their_n = (their_profile.ocean_scores or {}).get("neuroticism", 0)
+    if my_n > NEUROTICISM_PENALTY_THRESHOLD and their_n > NEUROTICISM_PENALTY_THRESHOLD:
+        score -= NEUROTICISM_PENALTY
+    return max(0.0, min(1.0, score))
 
-    # Food preference: compatible diets
-    my_food = user.food_preference
-    their_food = candidate.food_preference
-    my_seeking_food = my_filters.get("seeking_food")
-    their_seeking_food = their_filters.get("seeking_food")
 
-    if my_food and their_food:
-        my_compatible = FOOD_COMPATIBILITY.get(my_food, [my_food])
-        their_compatible = FOOD_COMPATIBILITY.get(their_food, [their_food])
-
-        if my_seeking_food and my_seeking_food != "doesn't matter":
-            if their_food not in my_compatible:
-                return False
-        if their_seeking_food and their_seeking_food != "doesn't matter":
-            if my_food not in their_compatible:
-                return False
-
-    # Drinking: both must have matching preferences
-    my_drinking = user.drinking
-    their_drinking = candidate.drinking
-    my_seeking_drinking = my_filters.get("seeking_drinking")
-    their_seeking_drinking = their_filters.get("seeking_drinking")
-
-    if (
-        my_drinking
-        and their_drinking
-        and my_seeking_drinking
-        and my_seeking_drinking != "doesn't matter"
-    ):
-        if their_drinking != my_seeking_drinking:
-            return False
-    if (
-        my_drinking
-        and their_drinking
-        and their_seeking_drinking
-        and their_seeking_drinking != "doesn't matter"
-    ):
-        if my_drinking != their_seeking_drinking:
-            return False
-
-    # Smoking: both must have matching preferences
-    my_smoking = user.smoking
-    their_smoking = candidate.smoking
-    my_seeking_smoking = my_filters.get("seeking_smoking")
-    their_seeking_smoking = their_filters.get("seeking_smoking")
-
-    if (
-        my_smoking
-        and their_smoking
-        and my_seeking_smoking
-        and my_seeking_smoking != "doesn't matter"
-    ):
-        if their_smoking != my_seeking_smoking:
-            return False
-    if (
-        my_smoking
-        and their_smoking
-        and their_seeking_smoking
-        and their_seeking_smoking != "doesn't matter"
-    ):
-        if my_smoking != their_seeking_smoking:
-            return False
-
-    return True
+def _compute_top_dimensions(
+    p1: PsychometricProfile, p2: PsychometricProfile
+) -> list[DimensionScore]:
+    o1 = p1.ocean_scores or {}
+    o2 = p2.ocean_scores or {}
+    labels = {
+        "openness":          "Openness",
+        "conscientiousness": "Conscientiousness",
+        "extraversion":      "Extraversion",
+        "agreeableness":     "Agreeableness",
+        "neuroticism":       "Emotional Stability",
+    }
+    descriptions = {
+        "openness":          "Both enjoy new experiences and ideas",
+        "conscientiousness": "Aligned on reliability and organization",
+        "extraversion":      "Similar social energy levels",
+        "agreeableness":     "Both tend to be cooperative and warm",
+        "neuroticism":       "Complementary emotional regulation",
+    }
+    dims = []
+    for k, label in labels.items():
+        sim = 1.0 - abs(o1.get(k, 0.5) - o2.get(k, 0.5))
+        if k == "neuroticism":
+            sim = 1.0 - (o1.get(k, 0.5) + o2.get(k, 0.5)) / 2
+        dims.append(DimensionScore(label=label, score=sim, description=descriptions[k]))
+    dims.sort(key=lambda d: d.score, reverse=True)
+    return dims
 
 
 def _build_preference_conditions(user: User) -> list:
-    """SQL WHERE conditions for hard preference filters only.
+    """SQL WHERE conditions for hard preference filters (bidirectional).
 
-    Covers gender, age, wants_children, religion, drinking, smoking, food —
-    all bidirectional. Excludes operational filters (meeting history, cooldown)
-    so this can be reused for both normal matching and rescue feasibility checks.
+    Safe to reuse for both Pass 1 candidate selection and rescue injection
+    target selection — excludes operational filters (cooldown, meetings).
     """
     import json as _json
 
-    hard_filters = user.hard_filters or {}
-    seeking_genders = hard_filters.get("seeking_gender", [])
-    max_age_diff = hard_filters.get("max_age_diff")
+    hf = user.hard_filters or {}
+    seeking_genders = hf.get("seeking_gender", [])
+    max_age_diff    = hf.get("max_age_diff")
 
     conditions = [
         PsychometricProfile.user_id != user.id,
@@ -165,7 +139,6 @@ def _build_preference_conditions(user: User) -> list:
         PsychometricProfile.identity_vector.is_not(None),
     ]
 
-    # Gender — bidirectional
     if seeking_genders:
         conditions.append(User.gender.in_(seeking_genders))
     if user.gender:
@@ -176,14 +149,12 @@ def _build_preference_conditions(user: User) -> list:
             ).bindparams(my_gender_json=_json.dumps([user.gender]))
         )
 
-    # Age
     if max_age_diff and user.age:
         conditions.append(
             User.age.between(user.age - max_age_diff, user.age + max_age_diff)
         )
 
-    # wants_children
-    my_wants_children = hard_filters.get("wants_children")
+    my_wants_children = hf.get("wants_children")
     if my_wants_children is not None:
         conditions.append(
             or_(
@@ -192,8 +163,7 @@ def _build_preference_conditions(user: User) -> list:
             )
         )
 
-    # Religion — bidirectional
-    my_seeking_religion = hard_filters.get("seeking_religion")
+    my_seeking_religion = hf.get("seeking_religion")
     if user.religion and my_seeking_religion and my_seeking_religion != "doesn't matter":
         conditions.append(User.religion == my_seeking_religion)
     if user.religion:
@@ -205,8 +175,7 @@ def _build_preference_conditions(user: User) -> list:
             )
         )
 
-    # Drinking — bidirectional
-    my_seeking_drinking = hard_filters.get("seeking_drinking")
+    my_seeking_drinking = hf.get("seeking_drinking")
     if user.drinking and my_seeking_drinking and my_seeking_drinking != "doesn't matter":
         conditions.append(User.drinking == my_seeking_drinking)
     if user.drinking:
@@ -218,8 +187,7 @@ def _build_preference_conditions(user: User) -> list:
             )
         )
 
-    # Smoking — bidirectional
-    my_seeking_smoking = hard_filters.get("seeking_smoking")
+    my_seeking_smoking = hf.get("seeking_smoking")
     if user.smoking and my_seeking_smoking and my_seeking_smoking != "doesn't matter":
         conditions.append(User.smoking == my_seeking_smoking)
     if user.smoking:
@@ -231,33 +199,27 @@ def _build_preference_conditions(user: User) -> list:
             )
         )
 
-    # Food — bidirectional with compatibility matrix
-    my_seeking_food = hard_filters.get("seeking_food")
+    my_seeking_food = hf.get("seeking_food")
     my_food = user.food_preference
     if my_food and my_seeking_food and my_seeking_food != "doesn't matter":
-        my_compatible = FOOD_COMPATIBILITY.get(my_food, [my_food])
-        conditions.append(User.food_preference.in_(my_compatible))
+        my_compat = FOOD_COMPATIBILITY.get(my_food, [my_food])
+        conditions.append(User.food_preference.in_(my_compat))
     if my_food:
-        reverse_compatible = [f for f, compat in FOOD_COMPATIBILITY.items() if my_food in compat]
+        rev_compat = [f for f, c in FOOD_COMPATIBILITY.items() if my_food in c]
         conditions.append(
             or_(
                 User.hard_filters["seeking_food"].is_(None),
                 User.hard_filters["seeking_food"].as_string() == "doesn't matter",
-                User.food_preference.in_(reverse_compatible),
+                User.food_preference.in_(rev_compat),
             )
         )
 
     return conditions
 
 
+# ── Candidate count (rescue feasibility) ─────────────────────────────────────
+
 async def count_hard_filter_candidates(user: User, db: AsyncSession) -> int:
-    """Count how many users pass user's hard preference filters (no vectors, no cooldown).
-
-    Used by the rescue pass to distinguish infeasible filters (0 result → flag for
-    human review) from a scoring/density problem (>0 result → keep boosting).
-    """
-    from sqlalchemy import func
-
     conditions = _build_preference_conditions(user)
     result = await db.execute(
         select(func.count())
@@ -268,29 +230,106 @@ async def count_hard_filter_candidates(user: User, db: AsyncSession) -> int:
     return result.scalar() or 0
 
 
-async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
-    # Fetch current user's profile
-    result = await db.execute(
+# ── Pass 1: raw scoring ───────────────────────────────────────────────────────
+
+async def run_pass1_for_user(user: User, db: AsyncSession) -> None:
+    """Compute top-K candidates and insert into match_candidates.
+
+    Uses ON CONFLICT DO NOTHING so rescue-injected rows are never overwritten.
+    """
+    profile_result = await db.execute(
         select(PsychometricProfile).where(PsychometricProfile.user_id == user.id)
     )
-    my_profile = result.scalar_one_or_none()
-
+    my_profile = profile_result.scalar_one_or_none()
     if not my_profile or my_profile.aspiration_vector is None:
+        return
+
+    conditions = _build_preference_conditions(user)
+    asp_vec = _vec_str(my_profile.aspiration_vector)
+
+    has_comm = my_profile.communication_vector is not None
+    comm_col = ""
+    if has_comm:
+        comm_vec = _vec_str(my_profile.communication_vector)
+        comm_col = (
+            f", COALESCE(1 - (psychometric_profiles.communication_vector"
+            f" <=> '{comm_vec}'::vector), NULL) AS comm_sim"
+        )
+
+    query = (
+        select(
+            User,
+            PsychometricProfile,
+            text(
+                f"1 - (psychometric_profiles.identity_vector <=> '{asp_vec}'::vector)"
+                f" AS semantic_sim{comm_col}"
+            ),
+        )
+        .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
+        .where(and_(*conditions))
+        .order_by(text("semantic_sim DESC"))
+        .limit(PASS1_TOP_K)
+    )
+
+    rows = (await db.execute(query)).all()
+    if not rows:
+        return
+
+    now = datetime.now(timezone.utc)
+    values = []
+    for row in rows:
+        if has_comm:
+            candidate_user, candidate_profile, semantic_sim, comm_sim = row
+        else:
+            candidate_user, candidate_profile, semantic_sim = row
+            comm_sim = None
+
+        score = _compute_composite_score(
+            my_profile,
+            candidate_profile,
+            float(semantic_sim),
+            float(comm_sim) if comm_sim is not None else None,
+        )
+        values.append({
+            "user_id":      user.id,
+            "candidate_id": candidate_user.id,
+            "score":        score,
+            "is_rescue":    False,
+            "computed_at":  now,
+        })
+
+    await db.execute(
+        pg_insert(MatchCandidate).values(values).on_conflict_do_nothing()
+    )
+    await db.commit()
+
+
+# ── Pass 2: mutual matching ───────────────────────────────────────────────────
+
+async def run_pass2_for_user(user: User, db: AsyncSession) -> list[MatchSummary]:
+    """Find mutual matches and write to Match table (display layer).
+
+    Mutual = A has B in match_candidates AND B has A in match_candidates.
+    Applies cooldown, meeting history, and referral exclusions.
+    """
+    my_profile_result = await db.execute(
+        select(PsychometricProfile).where(PsychometricProfile.user_id == user.id)
+    )
+    my_profile = my_profile_result.scalar_one_or_none()
+    if not my_profile:
         return []
 
-    # Preference-based hard filters (reused from _build_preference_conditions)
-    conditions = _build_preference_conditions(user)
+    mc_a = aliased(MatchCandidate)
+    mc_b = aliased(MatchCandidate)
 
-    # Operational filters — meeting history and cooldown are not user preferences
+    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(days=MATCH_COOLDOWN_DAYS)
+
     meeting_exists = exists().where(
         or_(
             and_(Meeting.proposer_id == user.id, Meeting.match_id == User.id),
             and_(Meeting.proposer_id == User.id, Meeting.match_id == user.id),
-        ),
+        )
     )
-    conditions.append(~meeting_exists)
-
-    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(days=MATCH_COOLDOWN_DAYS)
     recently_matched = exists().where(
         and_(
             Match.user_id == user.id,
@@ -298,155 +337,80 @@ async def get_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
             Match.first_matched_at > cooldown_cutoff,
         )
     )
-    conditions.append(~recently_matched)
-
-    # Referral exclusion — never match with someone who referred you or whom you referred
     referral_link = exists().where(
         or_(
             and_(Invitation.created_by == User.id, Invitation.used_by == user.id),
             and_(Invitation.created_by == user.id, Invitation.used_by == User.id),
         )
     )
-    conditions.append(~referral_link)
 
-    raw_vec = my_profile.aspiration_vector
-    if hasattr(raw_vec, "tolist"):
-        raw_vec = raw_vec.tolist()
-    aspiration_vec = "[" + ",".join(str(float(v)) for v in raw_vec) + "]"
-
-    has_comm_vec = my_profile.communication_vector is not None
-    comm_vec_str = ""
-    if has_comm_vec:
-        raw_comm = my_profile.communication_vector
-        if hasattr(raw_comm, "tolist"):
-            raw_comm = raw_comm.tolist()
-        comm_vec_str = "[" + ",".join(str(float(v)) for v in raw_comm) + "]"
-
-    similarity_cols = [
-        text(
-            f"1 - (psychometric_profiles.identity_vector <=> '{aspiration_vec}'::vector) AS semantic_sim"
-        ),
-    ]
-    if has_comm_vec:
-        similarity_cols.append(
-            text(
-                f"COALESCE(1 - (psychometric_profiles.communication_vector <=> '{comm_vec_str}'::vector), NULL) AS comm_sim"
-            ),
-        )
-
-    query = (
-        select(User, PsychometricProfile, *similarity_cols)
+    mutual_query = (
+        select(User, PsychometricProfile, mc_a.score)
+        .select_from(mc_a)
+        .join(mc_b, and_(
+            mc_b.user_id == mc_a.candidate_id,
+            mc_b.candidate_id == user.id,
+        ))
+        .join(User, User.id == mc_a.candidate_id)
         .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
-        .where(and_(*conditions))
-        .order_by(text("semantic_sim DESC"))
-        .limit(TOP_N * 2)
+        .where(
+            mc_a.user_id == user.id,
+            ~meeting_exists,
+            ~recently_matched,
+            ~referral_link,
+        )
+        .order_by(mc_a.score.desc())
+        .limit(MAX_VISIBLE_MATCHES)
     )
 
-    rows = (await db.execute(query)).all()
+    rows = (await db.execute(mutual_query)).all()
 
-    matches = []
-    for row in rows:
-        if has_comm_vec:
-            candidate_user, candidate_profile, semantic_sim, comm_sim = row
-        else:
-            candidate_user, candidate_profile, semantic_sim = row
-            comm_sim = None
-
-        # Bidirectional filter check
-        if not _meets_bidirectional_filters(user, candidate_user):
-            continue
-
-        semantic_score = float(semantic_sim)
-        linguistic_score = float(comm_sim) if comm_sim is not None else semantic_score
-
-        score = (
-            (WEIGHT_SEMANTIC * semantic_score)
-            + (WEIGHT_LINGUISTIC * linguistic_score)
-            + (WEIGHT_OCEAN * _ocean_similarity(my_profile, candidate_profile))
-        )
-
-        # Neuroticism conflict penalty
-        my_n = (my_profile.ocean_scores or {}).get("neuroticism", 0)
-        their_n = (candidate_profile.ocean_scores or {}).get("neuroticism", 0)
-        if (
-            my_n > NEUROTICISM_PENALTY_THRESHOLD
-            and their_n > NEUROTICISM_PENALTY_THRESHOLD
-        ):
-            score -= NEUROTICISM_PENALTY
-
-        score = max(0.0, min(1.0, score))
-
-        top_dimensions = _compute_top_dimensions(my_profile, candidate_profile)
-
-        matches.append(
-            MatchSummary(
-                id=candidate_user.id,
-                name=candidate_user.name,
-                age=candidate_user.age,
-                compatibility_score=score,
-                top_dimensions=top_dimensions[:3],
-            )
-        )
-
-    # Sort by final score after penalties
-    matches.sort(key=lambda m: m.compatibility_score, reverse=True)
-    return matches[:TOP_N]
-
-
-MATCH_COOLDOWN_DAYS = 180  # 6 months — don't re-show the same pair until profiles meaningfully change
-
-
-async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
-    """Compute matches for a user and store in Match.
-
-    Uses upsert so first_matched_at is preserved across daily refreshes.
-    Candidates within MATCH_COOLDOWN_DAYS of their first appearance are excluded
-    by get_matches — this function only cleans up expired rows outside that window.
-    """
-    from sqlalchemy import update
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from app.models.match import MatchStatus
-
-    matches = await get_matches(user, db)
     now = datetime.now(timezone.utc)
+    matches: list[MatchSummary] = []
+    upsert_rows = []
 
-    if matches:
-        rows = [
-            {
-                "user_id": user.id,
-                "matched_user_id": m.id,
-                "compatibility_score": m.compatibility_score,
-                "dimension_scores": [d.model_dump() for d in m.top_dimensions],
-                "computed_at": now,
-                "first_matched_at": now,
-                "status": MatchStatus.active,
-                "status_changed_at": None,
-            }
-            for m in matches
-        ]
-        stmt = pg_insert(Match).values(rows).on_conflict_do_update(
+    for candidate_user, candidate_profile, score in rows:
+        dims = _compute_top_dimensions(my_profile, candidate_profile)
+        upsert_rows.append({
+            "user_id":             user.id,
+            "matched_user_id":     candidate_user.id,
+            "compatibility_score": float(score),
+            "dimension_scores":    [d.model_dump() for d in dims],
+            "computed_at":         now,
+            "first_matched_at":    now,
+            "status":              MatchStatus.active,
+            "status_changed_at":   None,
+        })
+        matches.append(MatchSummary(
+            id=candidate_user.id,
+            name=candidate_user.name,
+            age=candidate_user.age,
+            compatibility_score=float(score),
+            top_dimensions=dims[:3],
+        ))
+
+    if upsert_rows:
+        stmt = pg_insert(Match).values(upsert_rows).on_conflict_do_update(
             index_elements=["user_id", "matched_user_id"],
             set_={
                 "compatibility_score": pg_insert(Match).excluded.compatibility_score,
-                "dimension_scores": pg_insert(Match).excluded.dimension_scores,
-                "computed_at": pg_insert(Match).excluded.computed_at,
-                "status": MatchStatus.active,
-                "status_changed_at": None,
+                "dimension_scores":    pg_insert(Match).excluded.dimension_scores,
+                "computed_at":         pg_insert(Match).excluded.computed_at,
+                "status":              MatchStatus.active,
+                "status_changed_at":   None,
                 # first_matched_at intentionally excluded — preserved from original insert
             },
         )
         await db.execute(stmt)
 
-    # Mark as expired rows that are both outside the cooldown window AND not in the current top-N
-    # (rows inside the cooldown stay so get_matches can exclude them next cycle)
+    # Expire rows outside cooldown window that aren't in this cycle's mutual batch
     current_ids = {m.id for m in matches}
-    cutoff = now - timedelta(days=MATCH_COOLDOWN_DAYS)
     await db.execute(
         update(Match)
         .where(
             Match.user_id == user.id,
             Match.matched_user_id.not_in(current_ids) if current_ids else text("true"),
-            Match.first_matched_at < cutoff,
+            Match.first_matched_at < cooldown_cutoff,
             Match.status == MatchStatus.active,
         )
         .values(status=MatchStatus.expired, status_changed_at=now)
@@ -456,10 +420,269 @@ async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchS
     return matches
 
 
+# ── Rescue: injection ─────────────────────────────────────────────────────────
+
+async def run_rescue_injection(db: AsyncSession) -> None:
+    """Inject rescue-flagged users into compatible users' match_candidates.
+
+    For each rescue user B:
+      - Run reverse vector query (B's identity vs everyone's aspiration)
+      - Skip target users who already have a rescue entry (1 per target max)
+      - Insert (target, B, score, is_rescue=True) with ON CONFLICT DO NOTHING
+    """
+    rescue_result = await db.execute(
+        select(User)
+        .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
+        .where(
+            User.rescue_flagged == True,  # noqa: E712
+            PsychometricProfile.analysis_status == AnalysisStatus.complete,
+            PsychometricProfile.identity_vector.is_not(None),
+        )
+    )
+    rescue_users = rescue_result.scalars().all()
+
+    for user_b in rescue_users:
+        profile_result = await db.execute(
+            select(PsychometricProfile).where(PsychometricProfile.user_id == user_b.id)
+        )
+        profile_b = profile_result.scalar_one_or_none()
+        if not profile_b or profile_b.identity_vector is None:
+            continue
+
+        rev_vec = _vec_str(profile_b.identity_vector)
+        conditions = _build_preference_conditions(user_b)
+
+        target_query = (
+            select(
+                User.id,
+                text(
+                    f"1 - (psychometric_profiles.aspiration_vector <=> '{rev_vec}'::vector)"
+                    " AS rev_sim"
+                ),
+            )
+            .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
+            .where(
+                and_(*conditions),
+                PsychometricProfile.aspiration_vector.is_not(None),
+                ~exists().where(
+                    and_(
+                        MatchCandidate.user_id == User.id,
+                        MatchCandidate.is_rescue == True,  # noqa: E712
+                    )
+                ),
+            )
+            .order_by(text("rev_sim DESC"))
+            .limit(RESCUE_INJECTION_LIMIT)
+        )
+
+        targets = (await db.execute(target_query)).all()
+        now = datetime.now(timezone.utc)
+
+        for target_id, rev_sim in targets:
+            await db.execute(
+                pg_insert(MatchCandidate)
+                .values(
+                    user_id=target_id,
+                    candidate_id=user_b.id,
+                    score=float(rev_sim),
+                    is_rescue=True,
+                    computed_at=now,
+                )
+                .on_conflict_do_nothing()
+            )
+
+        await db.commit()
+
+
+# ── Rescue: detection ─────────────────────────────────────────────────────────
+
+async def run_rescue_detection(db: AsyncSession) -> None:
+    """Flag users with fewer than RESCUE_MUTUAL_THRESHOLD active mutual matches."""
+    now = datetime.now(timezone.utc)
+
+    result = await db.execute(
+        select(User.id, func.count(Match.id).label("match_count"))
+        .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
+        .outerjoin(
+            Match,
+            and_(Match.user_id == User.id, Match.status == MatchStatus.active),
+        )
+        .where(
+            PsychometricProfile.analysis_status == AnalysisStatus.complete,
+            PsychometricProfile.identity_vector.is_not(None),
+        )
+        .group_by(User.id)
+    )
+
+    rows = result.all()
+    needs_rescue = [uid for uid, cnt in rows if cnt < RESCUE_MUTUAL_THRESHOLD]
+    has_enough   = [uid for uid, cnt in rows if cnt >= RESCUE_MUTUAL_THRESHOLD]
+
+    if needs_rescue:
+        await db.execute(
+            update(User)
+            .where(User.id.in_(needs_rescue))
+            .values(rescue_flagged=True, rescue_flagged_at=now)
+        )
+    if has_enough:
+        await db.execute(
+            update(User)
+            .where(User.id.in_(has_enough))
+            .values(rescue_flagged=False, rescue_flagged_at=None)
+        )
+    await db.commit()
+
+
+# ── Single-user immediate compute (post-interview) ────────────────────────────
+
+async def compute_and_cache_matches(user: User, db: AsyncSession) -> list[MatchSummary]:
+    """Run Pass 1 + Pass 2 for a single user immediately after interview.
+
+    Pass 2 requires other users' Pass 1 data to exist in match_candidates.
+    On cold start (no mutual candidates found), falls back to one-directional
+    matches so the user sees something immediately; the nightly batch will
+    replace these with proper mutual matches.
+    """
+    await run_pass1_for_user(user, db)
+    matches = await run_pass2_for_user(user, db)
+    if matches:
+        return matches
+    return await _compute_onedirectional_fallback(user, db)
+
+
+async def _compute_onedirectional_fallback(
+    user: User, db: AsyncSession
+) -> list[MatchSummary]:
+    """Cold-start fallback: one-directional matches stored until nightly batch."""
+    profile_result = await db.execute(
+        select(PsychometricProfile).where(PsychometricProfile.user_id == user.id)
+    )
+    my_profile = profile_result.scalar_one_or_none()
+    if not my_profile or my_profile.aspiration_vector is None:
+        return []
+
+    conditions = _build_preference_conditions(user)
+    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(days=MATCH_COOLDOWN_DAYS)
+
+    conditions.extend([
+        ~exists().where(
+            or_(
+                and_(Meeting.proposer_id == user.id, Meeting.match_id == User.id),
+                and_(Meeting.proposer_id == User.id, Meeting.match_id == user.id),
+            )
+        ),
+        ~exists().where(
+            and_(
+                Match.user_id == user.id,
+                Match.matched_user_id == User.id,
+                Match.first_matched_at > cooldown_cutoff,
+            )
+        ),
+        ~exists().where(
+            or_(
+                and_(Invitation.created_by == User.id, Invitation.used_by == user.id),
+                and_(Invitation.created_by == user.id, Invitation.used_by == User.id),
+            )
+        ),
+    ])
+
+    asp_vec = _vec_str(my_profile.aspiration_vector)
+    has_comm = my_profile.communication_vector is not None
+    comm_col = ""
+    if has_comm:
+        comm_vec = _vec_str(my_profile.communication_vector)
+        comm_col = (
+            f", COALESCE(1 - (psychometric_profiles.communication_vector"
+            f" <=> '{comm_vec}'::vector), NULL) AS comm_sim"
+        )
+
+    query = (
+        select(
+            User,
+            PsychometricProfile,
+            text(
+                f"1 - (psychometric_profiles.identity_vector <=> '{asp_vec}'::vector)"
+                f" AS semantic_sim{comm_col}"
+            ),
+        )
+        .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
+        .where(and_(*conditions))
+        .order_by(text("semantic_sim DESC"))
+        .limit(MAX_VISIBLE_MATCHES)
+    )
+
+    rows = (await db.execute(query)).all()
+    now = datetime.now(timezone.utc)
+    matches: list[MatchSummary] = []
+    upsert_rows = []
+
+    for row in rows:
+        if has_comm:
+            candidate_user, candidate_profile, semantic_sim, comm_sim = row
+        else:
+            candidate_user, candidate_profile, semantic_sim = row
+            comm_sim = None
+
+        score = _compute_composite_score(
+            my_profile,
+            candidate_profile,
+            float(semantic_sim),
+            float(comm_sim) if comm_sim is not None else None,
+        )
+        dims = _compute_top_dimensions(my_profile, candidate_profile)
+        upsert_rows.append({
+            "user_id":             user.id,
+            "matched_user_id":     candidate_user.id,
+            "compatibility_score": score,
+            "dimension_scores":    [d.model_dump() for d in dims],
+            "computed_at":         now,
+            "first_matched_at":    now,
+            "status":              MatchStatus.active,
+            "status_changed_at":   None,
+        })
+        matches.append(MatchSummary(
+            id=candidate_user.id,
+            name=candidate_user.name,
+            age=candidate_user.age,
+            compatibility_score=score,
+            top_dimensions=dims[:3],
+        ))
+
+    if upsert_rows:
+        stmt = pg_insert(Match).values(upsert_rows).on_conflict_do_update(
+            index_elements=["user_id", "matched_user_id"],
+            set_={
+                "compatibility_score": pg_insert(Match).excluded.compatibility_score,
+                "dimension_scores":    pg_insert(Match).excluded.dimension_scores,
+                "computed_at":         pg_insert(Match).excluded.computed_at,
+                "status":              MatchStatus.active,
+                "status_changed_at":   None,
+            },
+        )
+        await db.execute(stmt)
+
+    # Expire stale rows outside the cooldown window
+    current_ids = {m.id for m in matches}
+    await db.execute(
+        update(Match)
+        .where(
+            Match.user_id == user.id,
+            Match.matched_user_id.not_in(current_ids) if current_ids else text("true"),
+            Match.first_matched_at < cooldown_cutoff,
+            Match.status == MatchStatus.active,
+        )
+        .values(status=MatchStatus.expired, status_changed_at=now)
+    )
+
+    await db.commit()
+    return matches
+
+
+# ── Match detail (API helper) ─────────────────────────────────────────────────
+
 async def get_match_detail(
     user: User, match_user_id: str, db: AsyncSession
 ) -> MatchDetail | None:
-    # Fetch both profiles
     result = await db.execute(
         select(User, PsychometricProfile)
         .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
@@ -492,102 +715,29 @@ async def get_match_detail(
         if has_comm
         else ""
     )
-    similarity_result = await db.execute(
+    sim_result = await db.execute(
         text(
             f"SELECT 1 - (a.aspiration_vector <=> b.identity_vector) AS sem_sim{comm_clause} "
             "FROM psychometric_profiles a, psychometric_profiles b "
             "WHERE a.user_id = :uid_a AND b.user_id = :uid_b"
         ).bindparams(uid_a=user.id, uid_b=match_user_id)
     )
-    sim_row = similarity_result.first()
+    sim_row = sim_result.first()
     semantic_score = float(sim_row[0]) if sim_row else 0.0
-    linguistic_score = float(sim_row[1]) if (sim_row and has_comm) else semantic_score
-    ocean_sim = _ocean_similarity(my_profile, match_profile)
+    comm_sim = float(sim_row[1]) if (sim_row and has_comm) else None
 
-    base_score = (
-        (WEIGHT_SEMANTIC * semantic_score)
-        + (WEIGHT_LINGUISTIC * linguistic_score)
-        + (WEIGHT_OCEAN * ocean_sim)
-    )
+    score = _compute_composite_score(my_profile, match_profile, semantic_score, comm_sim)
+    all_dims = _compute_top_dimensions(my_profile, match_profile)
 
-    my_n = (my_profile.ocean_scores or {}).get("neuroticism", 0)
-    their_n = (match_profile.ocean_scores or {}).get("neuroticism", 0)
-    if my_n > NEUROTICISM_PENALTY_THRESHOLD and their_n > NEUROTICISM_PENALTY_THRESHOLD:
-        base_score -= NEUROTICISM_PENALTY
-    base_score = max(0.0, min(1.0, base_score))
-
-    all_dimensions = _compute_top_dimensions(my_profile, match_profile)
-
-    # Shared values
-    my_values = set((my_profile.values_profile or {}).get("core_values", []))
+    my_values    = set((my_profile.values_profile    or {}).get("core_values", []))
     their_values = set((match_profile.values_profile or {}).get("core_values", []))
-    shared_values = list(my_values & their_values)
 
     return MatchDetail(
         id=match_user.id,
         name=match_user.name,
         age=match_user.age,
-        compatibility_score=base_score,
-        dimension_scores=all_dimensions,
+        compatibility_score=score,
+        dimension_scores=all_dims,
         attachment_style=match_profile.attachment_style,
-        shared_values=shared_values,
+        shared_values=list(my_values & their_values),
     )
-
-
-def _ocean_similarity(
-    my_profile: PsychometricProfile,
-    their_profile: PsychometricProfile,
-) -> float:
-    my_ocean = my_profile.ocean_scores or {}
-    their_ocean = their_profile.ocean_scores or {}
-    keys = [
-        "openness",
-        "conscientiousness",
-        "extraversion",
-        "agreeableness",
-        "neuroticism",
-    ]
-    diffs = [abs(my_ocean.get(k, 0.5) - their_ocean.get(k, 0.5)) for k in keys]
-    return 1.0 - (sum(diffs) / len(diffs))
-
-
-def _compute_top_dimensions(
-    my_profile: PsychometricProfile,
-    their_profile: PsychometricProfile,
-) -> list[DimensionScore]:
-    my_ocean = my_profile.ocean_scores or {}
-    their_ocean = their_profile.ocean_scores or {}
-
-    dimensions = []
-    ocean_labels = {
-        "openness": "Openness",
-        "conscientiousness": "Conscientiousness",
-        "extraversion": "Extraversion",
-        "agreeableness": "Agreeableness",
-        "neuroticism": "Emotional Stability",
-    }
-    ocean_descriptions = {
-        "openness": "Both enjoy new experiences and ideas",
-        "conscientiousness": "Aligned on reliability and organization",
-        "extraversion": "Similar social energy levels",
-        "agreeableness": "Both tend to be cooperative and warm",
-        "neuroticism": "Complementary emotional regulation",
-    }
-
-    for key, label in ocean_labels.items():
-        my_score = my_ocean.get(key, 0.5)
-        their_score = their_ocean.get(key, 0.5)
-        # Similarity: 1 - abs difference (higher = more similar)
-        similarity = 1.0 - abs(my_score - their_score)
-        # For neuroticism, invert (low neuroticism pair = good)
-        if key == "neuroticism":
-            combined_n = (my_score + their_score) / 2
-            similarity = 1.0 - combined_n
-        dimensions.append(
-            DimensionScore(
-                label=label, score=similarity, description=ocean_descriptions[key]
-            )
-        )
-
-    dimensions.sort(key=lambda d: d.score, reverse=True)
-    return dimensions

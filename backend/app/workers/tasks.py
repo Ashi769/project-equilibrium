@@ -204,18 +204,41 @@ MATCH_BATCH_SIZE = 100
 
 
 async def _refresh_daily_matches():
+    """
+    Nightly 2-pass mutual matching pipeline.
+
+    Cycle order:
+      1. Truncate non-rescue rows from match_candidates
+      2. Rescue injection  — inject rescue-flagged users into compatible pools
+      3. Pass 1            — score top-K candidates for every eligible user
+      4. Pass 2            — mutual filter → write final matches to Match table
+      5. Rescue detection  — flag users with < threshold mutual matches
+    """
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-    from sqlalchemy import select, and_
+    from sqlalchemy import select, and_, text
     from app.models.psychometric import PsychometricProfile, AnalysisStatus
     from app.models.user import User
-    from app.services.matching_service import compute_and_cache_matches
+    from app.services.matching_service import (
+        run_pass1_for_user,
+        run_pass2_for_user,
+        run_rescue_injection,
+        run_rescue_detection,
+    )
 
     engine = create_async_engine(settings.async_database_url, echo=False)
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
-    # Fetch only IDs up front — cheap, bounds initial memory regardless of user count
+    # 1. Truncate non-rescue rows — rescue injections from previous detection survive
     async with Session() as db:
-        yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+        await db.execute(text("DELETE FROM match_candidates WHERE is_rescue = FALSE"))
+        await db.commit()
+
+    # 2. Rescue injection (uses rescue_flagged set by previous cycle's detection)
+    async with Session() as db:
+        await run_rescue_injection(db)
+
+    # Fetch all eligible user IDs for Pass 1 + Pass 2
+    async with Session() as db:
         id_result = await db.execute(
             select(User.id)
             .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
@@ -223,15 +246,12 @@ async def _refresh_daily_matches():
                 and_(
                     PsychometricProfile.analysis_status == AnalysisStatus.complete,
                     PsychometricProfile.identity_vector.is_not(None),
-                    User.last_matched_at.is_(None)
-                    | (User.last_matched_at < yesterday),
                 )
             )
         )
         user_ids = [row[0] for row in id_result.all()]
 
-    # Process in batches with a fresh session per batch so the identity map
-    # never grows beyond MATCH_BATCH_SIZE users worth of objects
+    # 3. Pass 1 — raw scoring for all users (must complete before Pass 2 starts)
     for i in range(0, len(user_ids), MATCH_BATCH_SIZE):
         batch_ids = user_ids[i : i + MATCH_BATCH_SIZE]
         async with Session() as db:
@@ -241,149 +261,31 @@ async def _refresh_daily_matches():
             users = user_result.scalars().all()
             for user in users:
                 try:
-                    await compute_and_cache_matches(user, db)
+                    await run_pass1_for_user(user, db)
+                except Exception:
+                    pass
+
+    # 4. Pass 2 — mutual matching for all users
+    for i in range(0, len(user_ids), MATCH_BATCH_SIZE):
+        batch_ids = user_ids[i : i + MATCH_BATCH_SIZE]
+        async with Session() as db:
+            user_result = await db.execute(
+                select(User).where(User.id.in_(batch_ids))
+            )
+            users = user_result.scalars().all()
+            for user in users:
+                try:
+                    await run_pass2_for_user(user, db)
                     user.last_matched_at = datetime.now(timezone.utc)
                 except Exception:
                     pass
             await db.commit()
 
-    await _run_rescue_pass(Session)
-    await engine.dispose()
-
-
-async def _run_rescue_pass(Session) -> None:
-    """Guarantee every user with a complete profile appears in at least RESCUE_MIN_FLOOR pools.
-
-    Runs after the main nightly batch so all pools are settled before we check
-    who was left out. Two outcomes for a stranded user:
-      - hard_filter_candidates == 0 → preferences are infeasible, flag for human review
-      - hard_filter_candidates  > 0 → inject into the best compatible hosts we can find
-    """
-    import uuid
-    from sqlalchemy import select, and_, update
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from app.models.match import Match, MatchStatus
-    from app.models.user import User
-    from app.models.psychometric import PsychometricProfile, AnalysisStatus
-    from app.services.matching_service import (
-        count_hard_filter_candidates,
-        get_matches,
-        TOP_N,
-        RESCUE_MIN_FLOOR,
-        RESCUE_SCORE_FLOOR,
-    )
-
-    # Find users with complete profiles that don't appear in any match pool
+    # 5. Rescue detection — sets rescue_flagged for next cycle
     async with Session() as db:
-        exposed_subq = (
-            select(Match.matched_user_id)
-            .where(Match.status == MatchStatus.active)
-            .distinct()
-            .scalar_subquery()
-        )
-        result = await db.execute(
-            select(User.id)
-            .join(PsychometricProfile, PsychometricProfile.user_id == User.id)
-            .where(
-                PsychometricProfile.analysis_status == AnalysisStatus.complete,
-                PsychometricProfile.identity_vector.is_not(None),
-                User.id.not_in(exposed_subq),
-            )
-        )
-        stranded_ids = [row[0] for row in result.all()]
+        await run_rescue_detection(db)
 
-    for user_id in stranded_ids:
-        async with Session() as db:
-            user_v = await db.get(User, user_id)
-            if not user_v:
-                continue
-
-            candidate_count = await count_hard_filter_candidates(user_v, db)
-
-            if candidate_count == 0:
-                # Hard filters eliminate everyone — flag for human review
-                user_v.rescue_flagged = True
-                user_v.rescue_flagged_at = datetime.now(timezone.utc)
-                await db.commit()
-                continue
-
-            # Get V's outbound matches — these are bidirectionally filter-verified hosts
-            outbound = await get_matches(user_v, db)
-            if not outbound:
-                continue
-
-            injection_count = 0
-            now = datetime.now(timezone.utc)
-
-            for host_match in outbound:
-                if injection_count >= RESCUE_MIN_FLOOR:
-                    break
-                if host_match.compatibility_score < RESCUE_SCORE_FLOOR:
-                    break
-
-                # Skip if V is already actively cached for this host
-                already_cached = (await db.execute(
-                    select(Match).where(
-                        Match.user_id == host_match.id,
-                        Match.matched_user_id == user_v.id,
-                        Match.status == MatchStatus.active,
-                    )
-                )).scalar_one_or_none()
-                if already_cached:
-                    injection_count += 1
-                    continue
-
-                # Check host's active cache capacity
-                host_caches = (await db.execute(
-                    select(Match)
-                    .where(
-                        Match.user_id == host_match.id,
-                        Match.status == MatchStatus.active,
-                    )
-                    .order_by(Match.compatibility_score.asc())
-                )).scalars().all()
-
-                evict_id = None
-                if len(host_caches) < TOP_N:
-                    pass  # room available
-                elif host_caches[0].compatibility_score < host_match.compatibility_score:
-                    evict_id = host_caches[0].id
-                else:
-                    continue  # host's cache is full with better-scoring matches
-
-                if evict_id:
-                    await db.execute(
-                        update(Match)
-                        .where(Match.id == evict_id)
-                        .values(status=MatchStatus.evicted, status_changed_at=now)
-                    )
-
-                new_row = {
-                    "id": str(uuid.uuid4()),
-                    "user_id": host_match.id,
-                    "matched_user_id": user_v.id,
-                    "compatibility_score": host_match.compatibility_score,
-                    "dimension_scores": [d.model_dump() for d in host_match.top_dimensions],
-                    "computed_at": now,
-                    "first_matched_at": now,
-                    "status": MatchStatus.active,
-                    "status_changed_at": None,
-                }
-                await db.execute(
-                    pg_insert(Match).values(new_row).on_conflict_do_update(
-                        index_elements=["user_id", "matched_user_id"],
-                        set_={
-                            "compatibility_score": pg_insert(Match).excluded.compatibility_score,
-                            "dimension_scores": pg_insert(Match).excluded.dimension_scores,
-                            "computed_at": pg_insert(Match).excluded.computed_at,
-                            "status": MatchStatus.active,
-                            "status_changed_at": None,
-                            # first_matched_at preserved from original insert
-                        },
-                    )
-                )
-                await db.commit()
-                injection_count += 1
+    await engine.dispose()
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=120)
