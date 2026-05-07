@@ -43,7 +43,7 @@ function LoginForm() {
 
   useEffect(() => {
     if (status === "authenticated" && session?.accessToken) {
-      router.replace("/selection");
+      router.replace(session.gender ? "/selection" : "/onboarding/identity");
     }
   }, [status, session, router]);
 

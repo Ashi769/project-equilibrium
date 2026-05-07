@@ -79,8 +79,10 @@ export default function IdentityPage() {
       sessionStorage.removeItem("pending_invite");
       sessionStorage.removeItem("pending_invite_ts");
 
-      // Update the NextAuth JWT so middleware sees the new gender immediately
-      await update({ gender: data.gender });
+      // Update the NextAuth JWT so middleware sees the new gender immediately.
+      // update() returns null on failure (doesn't throw) — retry once if needed.
+      const updated = await update({ gender: data.gender });
+      if (!updated) await update({ gender: data.gender });
 
       router.push("/onboarding");
     } catch (e) {
